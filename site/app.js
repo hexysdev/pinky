@@ -490,7 +490,12 @@ if (state.preview) {
 const rows = [['Vault', config.vault], ['Staking', config.staking], ['PINKY', config.token], ['IMD', config.imd]].filter(([, a]) => a);
 $('#addresses').innerHTML = rows.map(([k, a]) => `<dt>${k}</dt><dd><a href="${config.explorer}/address/${a}" target="_blank" rel="noopener">${a}</a></dd>`).join('');
 $('#gh').href = config.github;
-$('#xl').href = config.x;
+if (config.x) {
+  const x = $('#xl a');
+  x.href = config.x;
+  x.textContent = `@${config.x.split('/').pop()}`;
+  $('#xl').hidden = false;
+}
 refresh();
 setInterval(tick, 1000);
 setInterval(watch, state.preview ? 4000 : 30000);

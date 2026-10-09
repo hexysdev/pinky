@@ -8,7 +8,7 @@ time is up, the contract buys one answer from the IdentityMD oracle out of the b
 the wallet's outgoing `Transfer` values over the exact block range — and that answer decides
 where the bond goes. Keep your word and the IMD comes home. Break it and it doesn't.
 
-Live on Robinhood Chain since 2026-10-09 — [pinkybond.fun](https://pinkybond.fun), [@pinky_imd](https://x.com/pinky_imd).
+Live on Robinhood Chain since 2026-10-09 — [pinkybond.fun](https://pinkybond.fun).
 
 | | |
 |---|---|
@@ -162,6 +162,7 @@ The oracle (request `dbcac6c2-6328-47a9-8e07-4c7b55f78e45`) summed the wallet's 
 blocks 84272522–84278497 and attested 0: kept. 4.5 IMD went home, 0.5 IMD paid for the question.
 The callback used 104,652 gas in all, inside the Intake's 200,000.
 
-Two things this run showed. The answer took 11 minutes 18 seconds, against 2 minutes 15 for the
-earlier test: verdicts take minutes, not seconds. And five of seven panel members agreed at a
-quorum of five, the second run in a row to settle with no member to spare.
+What this run showed: the answer took 11 minutes 18 seconds, against 2 minutes 15 for the earlier
+test, so verdicts take minutes, not seconds. The oracle signs as soon as a quorum of matching
+answers is in: five members answered, all five said 0, and the other two seats were not waited
+for.

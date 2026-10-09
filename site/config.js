@@ -9,5 +9,6 @@ export const config = {
   staking: '0x17fb2067652bcf4803e937cf323a248ff6b7cba3',
   token: '0xb125c461c00863aacad4cc99311d2f23d4342a6f',
   github: 'https://github.com/hexysdev/pinky',
-  x: 'https://x.com/pinky_imd',
+  // Empty until the project has an account in good standing; the footer shows the link only when set.
+  x: '',
 };
