@@ -8,8 +8,8 @@ time is up, the contract buys one answer from the IdentityMD oracle out of the b
 the wallet's outgoing `Transfer` values over the exact block range — and that answer decides
 where the bond goes. Keep your word and the IMD comes home. Break it and it doesn't.
 
-Runs on Robinhood Chain. Status: contracts compile and 22 Foundry tests pass. Not deployed, not
-audited.
+Runs on Robinhood Chain. Status: contracts compile and 26 Foundry tests pass (unit, fuzz, invariant and
+the protocol's oracle conformance vector). Not deployed, not audited.
 
 ## How it works
 
@@ -73,10 +73,19 @@ v5.5.0, forge-std v1.9.7); nothing is downloaded at build time.
 - **Standard tokens only.** Rebasing or fee-on-transfer tokens are out of scope.
 - **Gas-limited payout.** The staker share is sent in a `try`; if it fails, that share is burned.
 
+## Checked against the live oracle
+
+On 2026-10-09 the exact question the vault builds was paid for on Robinhood Chain
+(`0x1e725da5203496444ba7a33cb4a66bb71e82e990c9a9bf823160edc83b0e2b96`, oracle request
+`c5e21f11-5172-4f9b-a506-9babcdfa47c2`). The window held four IMD transfers worth 18.6457 IMD; one,
+6.2152 IMD, came from the address in the filter. The oracle attested 6215220149346698936 wei in
+2 minutes 15 seconds, with the `filter.from` recipe as asked. Four of five panel members agreed at
+a quorum of four, so the launch asks for a panel of seven with a quorum of five.
+
+That request had no callback. Delivery into the vault is covered by tests against a mock Intake
+and has not run on chain yet.
+
 ## Open items
 
-- Invariant tests and the oracle consumer conformance test from launch 976.
-- One paid, live `oracle.request` with the exact body (`PinkyVault.bodyOf`) before launch. The
-  body shape already passes an unpaid `POST /requests/quote` (see
-  `requests/oracle-body.example.json`).
-- Publish the repository and run it through `POST /requests/import` and `/requests/check`.
+- Launch through `launch.open` (`requests/launch.input.json`).
+- A site that lists promises and their verdicts.

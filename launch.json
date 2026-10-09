@@ -24,8 +24,8 @@
         "0x6f7261636c652e72657175657374406f7261636c652d31000000000000000000",
         "0x5598aa9146215bc13eb26f2c692ad1461fd32982",
         "5000000000000000000",
+        "7",
         "5",
-        "4",
         "86400"
       ]
     }
@@ -36,5 +36,5 @@
     "tickSpacing": 60,
     "initialPrice": "79228162514264337593543950336"
   },
-  "notes": "Pinky on Robinhood Chain (4663), paired with IMD. LaunchToken has no constructor arguments. PinkyStaking(stakingToken = $token, rewardToken = IMD) has no owner. PinkyVault arguments, in order: owner ($owner), IMD, PinkyStaking, Intake, bytes32(\"oracle.request@oracle-1\"), oracle signer (the attester reported by https://api.imd.fun/oracle/requests on 2026-10-09), minimum bond 5 IMD, panel size 5, quorum 4, validity 86400 seconds. The owner may change the Intake, the action id, the signer and the panel settings; IMD, PinkyStaking and the minimum bond are immutable. No initialization calls."
+  "notes": "Pinky on Robinhood Chain (4663), paired with IMD. LaunchToken has no constructor arguments. PinkyStaking(stakingToken = $token, rewardToken = IMD) has no owner. PinkyVault arguments, in order: owner ($owner), IMD, PinkyStaking, Intake, bytes32(\"oracle.request@oracle-1\"), oracle signer (the attester reported by https://api.imd.fun/oracle/requests on 2026-10-09), minimum bond 5 IMD, panel size 7, quorum 5, validity 86400 seconds. The owner may change the Intake, the action id, the signer and the panel settings; IMD, PinkyStaking and the minimum bond are immutable. No initialization calls."
 }
