@@ -31,24 +31,43 @@ const erc20Abi = [
   { type: 'function', name: 'approve', stateMutability: 'nonpayable', inputs: [{ type: 'address' }, { type: 'uint256' }], outputs: [{ type: 'bool' }] },
 ];
 
-const state = { account: null, promises: [], minBond: 5n * 10n ** 18n, tokens: loadTokens(), preview: !config.vault };
+const state = {
+  account: null, promises: [], minBond: 5n * 10n ** 18n, preview: !config.vault,
+  tokens: loadTokens(),
+  // When each running promise began, by id: the vault stores the block, not the time.
+  starts: config.vault ? loadCache(`pinky.starts.${config.vault}`) : {},
+  // The status each promise had last time it was drawn, to notice a verdict arriving,
+  // and which cards are still having their moment.
+  seen: new Map(),
+  fresh: new Map(),
+  drawn: '',
+};
 
 // ───────────────────────── reading ─────────────────────────
 
-function loadTokens() {
-  try { return JSON.parse(localStorage.getItem('pinky.tokens') ?? '{}'); } catch { return {}; }
+function loadCache(key) {
+  try { return JSON.parse(localStorage.getItem(key) ?? '{}'); } catch { return {}; }
 }
+function loadTokens() { return loadCache('pinky.tokens'); }
 
-async function nodeBatch(calls) {
-  const body = calls.map((c, i) => ({ jsonrpc: '2.0', id: i, method: 'eth_call', params: [{ to: c.to, data: encodeFunctionData(c) }, 'latest'] }));
+/** One HTTP request, many calls: the node counts requests, not what is inside them. */
+async function rpc(batch) {
+  const body = batch.map((b, i) => ({ jsonrpc: '2.0', id: i, method: b.method, params: b.params }));
   const res = await fetch(config.rpc, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   if (!res.ok) throw new Error(`the node answered ${res.status}`);
   const byId = new Map((await res.json()).map((r) => [r.id, r]));
-  return calls.map((c, i) => {
-    const r = byId.get(i);
-    if (!r || r.error || !r.result || r.result === '0x') return null;
-    try { return decodeFunctionResult({ abi: c.abi, functionName: c.functionName, data: r.result }); } catch { return null; }
-  });
+  return batch.map((_, i) => { const r = byId.get(i); return r && !r.error ? r.result ?? null : null; });
+}
+
+const asCall = (c) => ({ method: 'eth_call', params: [{ to: c.to, data: encodeFunctionData(c) }, 'latest'] });
+function decode(c, result) {
+  if (!result || result === '0x') return null;
+  try { return decodeFunctionResult({ abi: c.abi, functionName: c.functionName, data: result }); } catch { return null; }
+}
+
+async function nodeBatch(calls) {
+  const out = await rpc(calls.map(asCall));
+  return calls.map((c, i) => decode(c, out[i]));
 }
 
 async function readBoard() {
@@ -63,17 +82,31 @@ async function readBoard() {
   state.total = Number(count);
 }
 
-async function readTokens() {
-  const unknown = [...new Set(state.promises.map((p) => p.token.toLowerCase()))].filter((t) => !state.tokens[t]);
-  if (!unknown.length) return;
+/** Second request: what the board cannot say by itself — token names, and when running promises began. */
+async function readExtras() {
+  const tokens = [...new Set(state.promises.map((p) => p.token.toLowerCase()))].filter((t) => !state.tokens[t]);
+  const running = state.promises.filter((p) => STATUS[p.status] === 'Active' && !state.starts[p.id]);
+  if (!tokens.length && !running.length) return false;
   await new Promise((ok) => setTimeout(ok, NODE_GAP_MS));
-  const calls = unknown.flatMap((to) => [{ to, abi: erc20Abi, functionName: 'symbol' }, { to, abi: erc20Abi, functionName: 'decimals' }]);
-  const out = await nodeBatch(calls);
-  unknown.forEach((t, i) => {
-    if (out[2 * i + 1] !== null) state.tokens[t] = { symbol: out[2 * i] ?? '', decimals: Number(out[2 * i + 1]) };
+  const calls = tokens.flatMap((to) => [{ to, abi: erc20Abi, functionName: 'symbol' }, { to, abi: erc20Abi, functionName: 'decimals' }]);
+  const out = await rpc([
+    ...calls.map(asCall),
+    ...running.map((p) => ({ method: 'eth_getBlockByNumber', params: [`0x${BigInt(p.startBlock).toString(16)}`, false] })),
+  ]);
+  tokens.forEach((t, i) => {
+    const decimals = decode(calls[2 * i + 1], out[2 * i + 1]);
+    if (decimals !== null) state.tokens[t] = { symbol: decode(calls[2 * i], out[2 * i]) ?? '', decimals: Number(decimals) };
+  });
+  running.forEach((p, i) => {
+    const block = out[calls.length + i];
+    if (block?.timestamp) state.starts[p.id] = Number(block.timestamp);
   });
   localStorage.setItem('pinky.tokens', JSON.stringify(state.tokens));
+  localStorage.setItem(`pinky.starts.${config.vault}`, JSON.stringify(state.starts));
+  return true;
 }
+
+const previewSince = Math.floor(Date.now() / 1000);
 
 function previewData() {
   const now = Math.floor(Date.now() / 1000);
@@ -81,9 +114,12 @@ function previewData() {
   state.tokens[t] = { symbol: 'MEME', decimals: 18 };
   const base = { token: t, attempts: 1, paid: false, asker: '0x0000000000000000000000000000000000000000', observedOut: 0n };
   const e18 = 10n ** 18n;
+  state.starts[4] = previewSince - 300;
+  // The third example gets its verdict a few seconds in, so the preview shows a promise being kept.
+  const counted = now - previewSince >= 12;
   state.promises = [
-    { ...base, id: 4, maker: '0x1111111111111111111111111111111111111111', maxOut: 0n, bond: 20n * e18, endTime: now + 1500, status: 0, attempts: 0 },
-    { ...base, id: 3, maker: '0x2222222222222222222222222222222222222222', maxOut: 1000000n * e18, bond: 95n * e18 / 10n, endTime: now - 300, status: 2 },
+    { ...base, id: 4, maker: '0x1111111111111111111111111111111111111111', maxOut: 0n, bond: 20n * e18, endTime: previewSince + 1500, status: 0, attempts: 0 },
+    { ...base, id: 3, maker: '0x2222222222222222222222222222222222222222', maxOut: 1000000n * e18, bond: 95n * e18 / 10n, endTime: previewSince - 300, status: counted ? 3 : 2 },
     { ...base, id: 2, maker: '0x3333333333333333333333333333333333333333', maxOut: 0n, bond: 0n, endTime: now - 7200, status: 3, paid: true },
     { ...base, id: 1, maker: '0x4444444444444444444444444444444444444444', maxOut: 5000000n * e18, bond: 0n, endTime: now - 90000, status: 4, paid: true, observedOut: 48000000n * e18 },
   ];
@@ -104,12 +140,30 @@ function amount(p, wei) {
   return `${n.toLocaleString('en-US', { maximumFractionDigits: 2 })} ${esc(meta.symbol || 'tokens')}`;
 }
 
-function when(ts) {
-  const d = Number(ts) - Date.now() / 1000;
-  const abs = Math.abs(d);
-  const unit = abs < 3600 ? [60, 'min'] : abs < 172800 ? [3600, 'h'] : [86400, 'd'];
-  const n = Math.max(1, Math.round(abs / unit[0]));
-  return d > 0 ? `in ${n} ${unit[1]}` : `${n} ${unit[1]} ago`;
+function countdown(ts) {
+  const left = Math.max(0, Math.round(Number(ts) - Date.now() / 1000));
+  if (left >= 172800) return `${Math.round(left / 86400)} days`;
+  const h = Math.floor(left / 3600);
+  const m = String(Math.floor((left % 3600) / 60)).padStart(h ? 2 : 1, '0');
+  const s = String(left % 60).padStart(2, '0');
+  return h ? `${h}:${m}:${s}` : `${m}:${s}`;
+}
+
+const hooks = (cls) => `<svg class="hooks ${cls}" viewBox="40 30 100 120" aria-hidden="true"><g fill="none" stroke-width="14" stroke-linecap="round"><path class="h1" d="M66 44 V92 A16 16 0 0 0 98 92 V84"/><path class="h2" d="M114 136 V88 A16 16 0 0 0 82 88 V96"/></g></svg>`;
+
+/** Every second: countdowns and term bars move without redrawing the board. */
+function tick() {
+  const now = Date.now() / 1000;
+  let ended = false;
+  for (const el of document.querySelectorAll('[data-countdown]')) {
+    el.textContent = countdown(el.dataset.countdown);
+    if (now >= Number(el.dataset.countdown)) ended = true;
+  }
+  for (const el of document.querySelectorAll('[data-term]')) {
+    const [start, end] = el.dataset.term.split(',').map(Number);
+    el.style.width = `${Math.min(100, Math.max(0, ((now - start) / (end - start)) * 100)).toFixed(2)}%`;
+  }
+  if (ended) render();
 }
 
 function describe(p) {
@@ -123,11 +177,11 @@ function describe(p) {
     case 'Active':
       return over
         ? { say, badge: ['waiting', 'Time is up'], note: 'Anyone can close it now.', action: ['close', 'Close it'] }
-        : { say, badge: ['waiting', 'Running'], note: `Ends ${when(p.endTime)}.` };
+        : { say, badge: ['waiting', 'Running'], note: `Ends in <b data-countdown="${Number(p.endTime)}"></b>.`, running: true };
     case 'Closed':
       return { say, badge: ['waiting', 'Closed'], note: 'Ready for the oracle. Asking costs the bond 0.5 IMD.', action: ['ask', 'Ask the oracle'] };
     case 'Asked':
-      return { say, badge: ['waiting', 'Counting'], note: `The swarm is counting. Attempt ${p.attempts} of 3.` };
+      return { say, badge: ['waiting', 'Counting'], note: `The swarm is counting<span class="dots" aria-hidden="true"><i></i><i></i><i></i></span> Attempt ${p.attempts} of 3.` };
     case 'Kept':
       return { say, badge: ['kept', 'Kept'], note: p.paid ? 'Kept their word. The bond went home.' : 'Kept their word. The bond is ready to go home.', action: p.paid ? null : ['payout', 'Send it home'] };
     case 'Broken':
@@ -139,15 +193,28 @@ function describe(p) {
 
 function render() {
   const cards = $('#cards');
+  let html;
   if (!state.promises.length) {
-    cards.innerHTML = '<p class="empty">No promises yet. Be the first to mean it.</p>';
+    html = '<p class="empty">No promises yet. Be the first to mean it.</p>';
   } else {
-    cards.innerHTML = state.promises.map((p) => {
+    html = state.promises.map((p) => {
       const d = describe(p);
       const token = state.tokens[p.token.toLowerCase()];
-      return `<article class="card">
-        <div class="card-head"><span class="badge ${d.badge[0]}">${d.badge[1]}</span><span class="id">#${p.id}</span></div>
+      const status = STATUS[p.status];
+      // A verdict that arrived since the last draw gets its moment once.
+      const before = state.seen.get(p.id);
+      if (before !== undefined && before !== status && (status === 'Kept' || status === 'Broken')) {
+        state.fresh.set(p.id, { cls: `just-${status.toLowerCase()}`, until: Date.now() + 3000 });
+      }
+      state.seen.set(p.id, status);
+      const mark = state.fresh.get(p.id);
+      const fresh = mark && Date.now() < mark.until ? mark.cls : '';
+      const start = state.starts[p.id];
+      const bar = d.running && start ? `<div class="term"><i data-term="${start},${Number(p.endTime)}"></i></div>` : '';
+      return `<article class="card ${fresh}">
+        <div class="card-head"><span class="badge ${d.badge[0]}">${d.badge[1]}</span><span class="id">#${p.id}</span>${hooks(status === 'Broken' ? 'apart' : status === 'Refunded' ? 'idle' : '')}</div>
         <p class="say">${d.say}</p>
+        ${bar}
         <div class="meta">
           <span>Token <b>${link('address', p.token, token?.symbol || short(p.token))}</b></span>
           <span>Bond <b>${imd(p.bond)} IMD</b></span>
@@ -157,21 +224,39 @@ function render() {
       </article>`;
     }).join('');
   }
-  const stat = (k, v) => { $(`[data-stat="${k}"]`).textContent = v; };
+  // Redraw only when something changed: replacing a card restarts whatever it was animating.
+  if (html !== state.drawn) {
+    state.drawn = html;
+    cards.innerHTML = html;
+  }
+  const stat =(k, v) => { $(`[data-stat="${k}"]`).textContent = v; };
   stat('made', state.total ?? 0);
   stat('kept', state.promises.filter((p) => STATUS[p.status] === 'Kept').length);
   stat('broken', state.promises.filter((p) => STATUS[p.status] === 'Broken').length);
   stat('locked', imd(state.promises.reduce((s, p) => s + p.bond, 0n)));
+  tick();
 }
 
+let reading = false;
+
 async function refresh() {
+  if (reading) return;
+  reading = true;
   try {
     if (state.preview) previewData(); else await readBoard();
     render();
-    if (!state.preview) { await readTokens(); render(); }
+    if (!state.preview && await readExtras()) render();
   } catch (e) {
-    $('#cards').innerHTML = `<p class="empty">Couldn't read the chain: ${esc(e.message)}. Try again in a minute.</p>`;
+    if (!state.promises.length) $('#cards').innerHTML = `<p class="empty">Couldn't read the chain: ${esc(e.message)}. Try again in a minute.</p>`;
+  } finally {
+    reading = false;
   }
+}
+
+/** While something on the board can still change, look again every so often. */
+function watch() {
+  const open = state.promises.some((p) => ['Active', 'Closed', 'Asked'].includes(STATUS[p.status]) || (!p.paid && ['Kept', 'Broken'].includes(STATUS[p.status])));
+  if (open && !document.hidden) refresh();
 }
 
 // ───────────────────────── wallet ─────────────────────────
@@ -213,6 +298,14 @@ async function send(to, abi, functionName, args) {
 }
 
 const readable = (e) => e?.shortMessage || e?.message || String(e);
+
+/** The big hooks behind the headline pull tight for a moment. */
+function squeeze() {
+  const bg = $('.hero-hooks');
+  bg.classList.remove('squeeze');
+  void bg.getBoundingClientRect();
+  bg.classList.add('squeeze');
+}
 
 // ───────────────────────── actions ─────────────────────────
 
@@ -261,6 +354,7 @@ $('#form').addEventListener('submit', async (ev) => {
     msg('Step 2 of 2: make the promise. Confirm in your wallet…');
     await send(config.vault, vaultAbi, 'make', [getAddress(token), maxOut, BigInt(seconds), bond]);
     msg("It's on the board. Now keep it.");
+    squeeze();
     ev.target.reset();
     setTimeout(refresh, NODE_GAP_MS);
   } catch (e) {
@@ -281,3 +375,5 @@ $('#addresses').innerHTML = rows.map(([k, a]) => `<dt>${k}</dt><dd><a href="${co
 $('#gh').href = config.github;
 $('#xl').href = config.x;
 refresh();
+setInterval(tick, 1000);
+setInterval(watch, state.preview ? 4000 : 30000);
