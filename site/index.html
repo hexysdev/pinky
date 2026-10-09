@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pinky — a promise with money behind it</title>
+<meta name="description" content="Deployers pinky-promise not to dump. Pinky holds their IMD until the IdentityMD oracle says they kept their word.">
+<link rel="icon" href="mark.svg" type="image/svg+xml">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="#">
+    <svg viewBox="40 30 100 120" aria-hidden="true"><g fill="none" stroke-width="13" stroke-linecap="round"><path d="M66 44 V92 A16 16 0 0 0 98 92 V84" style="stroke:var(--ivory)"/><path d="M114 136 V88 A16 16 0 0 0 82 88 V96" style="stroke:var(--pink)"/></g></svg>
+    <span>pinky</span>
+  </a>
+  <nav>
+    <a href="#board">Promises</a>
+    <a href="#how">How it works</a>
+    <a href="#make">Make one</a>
+  </nav>
+  <button id="connect" class="btn ghost">Connect wallet</button>
+</header>
+
+<section class="hero">
+  <div class="wrap">
+    <h1>A promise with money behind it.</h1>
+    <p class="lede">Every deployer says they won't dump. Here they put IMD on it. Keep your word and it comes home. Break it and it doesn't.</p>
+    <dl class="stats" id="stats">
+      <div><dt>Promises made</dt><dd data-stat="made">—</dd></div>
+      <div><dt>Kept</dt><dd data-stat="kept">—</dd></div>
+      <div><dt>Broken</dt><dd data-stat="broken">—</dd></div>
+      <div><dt>IMD on the line</dt><dd data-stat="locked">—</dd></div>
+    </dl>
+  </div>
+</section>
+
+<main class="wrap">
+  <p id="notice" class="notice" hidden></p>
+
+  <section id="board">
+    <h2>Promises</h2>
+    <p class="sub">Newest first. Anyone can close a promise once its time is up, ask the oracle, and pay it out.</p>
+    <div id="cards" class="cards"><p class="empty">Reading the chain…</p></div>
+  </section>
+
+  <section id="how">
+    <h2>How it works</h2>
+    <ol class="steps">
+      <li><h3>Put IMD on it</h3><p>A deployer picks a token, a limit and a deadline, and locks IMD behind one sentence: <em>my wallet won't move more than this before then.</em></p></li>
+      <li><h3>Time runs out</h3><p>Anyone closes the promise. That fixes the exact block range it covered, start to finish.</p></li>
+      <li><h3>The swarm counts</h3><p>The contract pays the IdentityMD oracle 0.5 IMD out of the bond. A panel of agents sums every transfer out of that wallet over those blocks and signs the number.</p></li>
+      <li><h3>The number decides</h3><p>Within the limit: the bond goes home. Over it: a tenth goes to whoever asked, and the rest is split between PINKY stakers and a burn.</p></li>
+    </ol>
+    <p class="fine">A promise covers one wallet and one token, and nobody can pause or edit it once it's made. If the oracle can't answer after three tries, the bond is returned. The contracts are not audited by a third party; read them before you trust them.</p>
+  </section>
+
+  <section id="make">
+    <h2>Make a promise</h2>
+    <p class="sub">It's about your own wallet: the one you connect. The bond is in IMD on Robinhood Chain.</p>
+    <form id="form" class="form">
+      <label>Token you won't move<input name="token" placeholder="0x…" autocomplete="off" required></label>
+      <label>At most this many tokens out<input name="maxOut" inputmode="decimal" placeholder="0" value="0" required></label>
+      <label>For how long
+        <span class="row"><input name="duration" inputmode="numeric" value="30" required><select name="unit"><option value="60">minutes</option><option value="3600">hours</option><option value="86400">days</option></select></span>
+      </label>
+      <label>Bond, in IMD<input name="bond" inputmode="decimal" placeholder="5" required></label>
+      <p class="fine" id="formHint">Minimum bond 5 IMD. Terms run from 10 minutes to 30 days; the oracle has been checked on short ones.</p>
+      <button class="btn" id="submit" type="submit">Make the promise</button>
+      <p id="formMsg" class="msg"></p>
+    </form>
+  </section>
+</main>
+
+<footer class="foot">
+  <div class="wrap">
+    <dl id="addresses"></dl>
+    <p><a id="gh" target="_blank" rel="noopener">Source</a> · <a id="xl" target="_blank" rel="noopener">@pinky_imd</a> · Built on the IdentityMD oracle.</p>
+  </div>
+</footer>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
