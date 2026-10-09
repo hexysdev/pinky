@@ -42,7 +42,8 @@ h1, h2, .brand, .stats dd, .card p.say { font-family: var(--display); font-varia
 .hero { background: var(--wine); color: var(--ivory); padding: 56px 0 56px; }
 .hero-grid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 48px; align-items: center; }
 .hero h1 { font-size: clamp(40px, 5.6vw, 64px); font-weight: 600; line-height: 1.04; letter-spacing: -.01em; margin: 0 0 18px; }
-.lede { font-size: 20px; max-width: 40ch; margin: 0 0 36px; color: #EBDCD0; }
+.lede { font: italic 400 24px/1.45 var(--display); font-variation-settings: 'SOFT' 100, 'WONK' 1; max-width: 34ch; margin: 0 0 36px; color: #EBDCD0; }
+.lede mark { background: none; color: var(--pink); font-weight: 600; white-space: nowrap; }
 .stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin: 0; }
 .stats div { border-top: 2px solid rgba(231, 154, 168, .45); padding-top: 10px; }
 .stats dt { font-size: 13px; font-weight: 600; color: var(--pink); }
