@@ -31,8 +31,22 @@ const erc20Abi = [
   { type: 'function', name: 'approve', stateMutability: 'nonpayable', inputs: [{ type: 'address' }, { type: 'uint256' }], outputs: [{ type: 'bool' }] },
 ];
 
+const stakingAbi = [
+  { type: 'function', name: 'totalStaked', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint256' }] },
+  { type: 'function', name: 'rewardRate', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint256' }] },
+  { type: 'function', name: 'periodFinish', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint256' }] },
+  { type: 'function', name: 'balanceOf', stateMutability: 'view', inputs: [{ type: 'address' }], outputs: [{ type: 'uint256' }] },
+  { type: 'function', name: 'earned', stateMutability: 'view', inputs: [{ type: 'address' }], outputs: [{ type: 'uint256' }] },
+  { type: 'function', name: 'stake', stateMutability: 'nonpayable', inputs: [{ type: 'uint256' }], outputs: [] },
+  { type: 'function', name: 'unstake', stateMutability: 'nonpayable', inputs: [{ type: 'uint256' }], outputs: [] },
+  { type: 'function', name: 'claim', stateMutability: 'nonpayable', inputs: [], outputs: [] },
+];
+
 const state = {
   account: null, promises: [], minBond: 5n * 10n ** 18n, preview: !config.vault,
+  // The staking pool as everyone sees it, and the connected wallet's place in it.
+  pool: { totalStaked: 0n, rewardRate: 0n, periodFinish: 0 },
+  mine: null,
   tokens: loadTokens(),
   // When each running promise began, by id: the vault stores the block, not the time.
   starts: config.vault ? loadCache(`pinky.starts.${config.vault}`) : {},
@@ -72,11 +86,16 @@ async function nodeBatch(calls) {
 
 async function readBoard() {
   const vault = { to: config.vault, abi: vaultAbi };
-  const calls = [{ ...vault, functionName: 'count' }, { ...vault, functionName: 'minBond' }];
+  const pool = { to: config.staking, abi: stakingAbi };
+  const calls = [
+    { ...vault, functionName: 'count' }, { ...vault, functionName: 'minBond' },
+    { ...pool, functionName: 'totalStaked' }, { ...pool, functionName: 'rewardRate' }, { ...pool, functionName: 'periodFinish' },
+  ];
   for (let id = 1; id <= PAGE; id++) calls.push({ ...vault, functionName: 'promises', args: [BigInt(id)] });
-  const [count, minBond, ...rows] = await nodeBatch(calls);
+  const [count, minBond, totalStaked, rewardRate, periodFinish, ...rows] = await nodeBatch(calls);
   if (count === null) throw new Error('the vault did not answer');
   if (minBond) state.minBond = minBond;
+  if (totalStaked !== null) state.pool = { totalStaked, rewardRate: rewardRate ?? 0n, periodFinish: Number(periodFinish ?? 0n) };
   const keys = vaultAbi[2].outputs.map((o) => o.name);
   state.promises = rows.slice(0, Number(count)).map((row, i) => row && { id: i + 1, ...Object.fromEntries(keys.map((k, j) => [k, row[j]])) }).filter(Boolean).reverse();
   state.total = Number(count);
@@ -115,6 +134,7 @@ function previewData() {
   const base = { token: t, attempts: 1, paid: false, asker: '0x0000000000000000000000000000000000000000', observedOut: 0n };
   const e18 = 10n ** 18n;
   state.starts[4] = previewSince - 300;
+  state.pool = { totalStaked: 31400000n * e18, rewardRate: 22n * e18 / 604800n, periodFinish: previewSince + 5 * 86400 };
   // The third example gets its verdict a few seconds in, so the preview shows a promise being kept.
   const counted = now - previewSince >= 12;
   state.promises = [
@@ -234,7 +254,50 @@ function render() {
   stat('kept', state.promises.filter((p) => STATUS[p.status] === 'Kept').length);
   stat('broken', state.promises.filter((p) => STATUS[p.status] === 'Broken').length);
   stat('locked', imd(state.promises.reduce((s, p) => s + p.bond, 0n)));
+  renderPool();
   tick();
+}
+
+const whole = (wei) => Number(formatUnits(wei, 18)).toLocaleString('en-US', { maximumFractionDigits: 0 });
+const fine = (wei) => Number(formatUnits(wei, 18)).toLocaleString('en-US', { maximumFractionDigits: 4 });
+
+/** A promise of the connected wallet about PINKY that is still running: staking would break it. */
+function runningPinkyPromise() {
+  if (!state.account || !config.token) return null;
+  return state.promises.find((p) => STATUS[p.status] === 'Active'
+    && p.maker.toLowerCase() === state.account.toLowerCase() && p.token.toLowerCase() === config.token.toLowerCase()) ?? null;
+}
+
+function renderPool() {
+  const { totalStaked, rewardRate, periodFinish } = state.pool;
+  $('#poolTotal').textContent = `${whole(totalStaked)} PINKY`;
+  const streaming = rewardRate > 0n && Date.now() / 1000 < periodFinish;
+  $('#poolStream').textContent = streaming
+    ? `${fine(rewardRate * 86400n)} IMD a day, until ${new Date(periodFinish * 1000).toLocaleDateString('en-GB', { dateStyle: 'medium' })}`
+    : 'Nothing right now';
+  const mine = state.mine;
+  $('#myStake').textContent = mine ? `${whole(mine.staked)} PINKY` : '—';
+  $('#myEarned').textContent = mine ? `${fine(mine.earned)} IMD` : '—';
+  $('#poolHint').textContent = !state.account ? 'Connect a wallet to see your stake.'
+    : mine ? `You have ${whole(mine.wallet)} PINKY in your wallet.` : '';
+  const blocked = runningPinkyPromise();
+  $('#stakeWarn').hidden = !blocked;
+  if (blocked) $('#stakeWarn').textContent = `Hold on: promise #${blocked.id} says you won't move PINKY, and staking moves it out of your wallet. Stake now and you break it. Wait until it's closed.`;
+  $('#stakeBtn').disabled = !!blocked;
+  $('#claimBtn').disabled = !mine || mine.earned === 0n;
+  $('#unstakeBtn').disabled = !!mine && mine.staked === 0n;
+}
+
+/** The connected wallet's stake, read through the wallet itself rather than the public node. */
+async function readMine() {
+  if (!state.account || state.preview) return;
+  const [staked, earned, wallet] = await Promise.all([
+    walletCall(config.staking, stakingAbi, 'balanceOf', [state.account]),
+    walletCall(config.staking, stakingAbi, 'earned', [state.account]),
+    walletCall(config.token, stakingAbi, 'balanceOf', [state.account]),
+  ]);
+  state.mine = { staked, earned, wallet };
+  renderPool();
 }
 
 let reading = false;
@@ -246,6 +309,7 @@ async function refresh() {
     if (state.preview) previewData(); else await readBoard();
     render();
     if (!state.preview && await readExtras()) render();
+    readMine().catch(() => {});
   } catch (e) {
     if (!state.promises.length) $('#cards').innerHTML = `<p class="empty">Couldn't read the chain: ${esc(e.message)}. Try again in a minute.</p>`;
   } finally {
@@ -277,6 +341,8 @@ async function connect() {
   }
   state.account = getAddress(account);
   $('#connect').textContent = short(state.account);
+  renderPool();
+  readMine().catch(() => {});
   return state.account;
 }
 
@@ -372,6 +438,48 @@ $('#form').addEventListener('submit', async (ev) => {
     $('#submit').disabled = false;
   }
 });
+
+// Stake, unstake, claim.
+async function poolAction(kind) {
+  const msg = (text, bad = false) => { $('#poolMsg').textContent = text; $('#poolMsg').className = bad ? 'msg bad' : 'msg'; };
+  if (state.preview) return msg('The contracts are not live yet, so this is switched off.', true);
+  try {
+    if (!state.account) await connect();
+    await readMine();
+    if (kind === 'claim') {
+      msg('Confirm in your wallet…');
+      await send(config.staking, stakingAbi, 'claim', []);
+      msg('Claimed. The IMD is in your wallet.');
+    } else {
+      const text = $('#stakeAmount').value.trim().replace(/[\s,]/g, '');
+      if (!/^\d+(\.\d+)?$/.test(text) || Number(text) === 0) return msg('Enter how many PINKY.', true);
+      const amount = parseUnits(text, 18);
+      if (kind === 'stake') {
+        if (runningPinkyPromise()) return msg("You have a running promise about PINKY. Staking now would break it.", true);
+        if (amount > state.mine.wallet) return msg(`You have ${whole(state.mine.wallet)} PINKY in your wallet.`, true);
+        const allowed = await walletCall(config.token, erc20Abi, 'allowance', [state.account, config.staking]);
+        if (allowed < amount) {
+          msg('Step 1 of 2: let the pool take the tokens. Confirm in your wallet…');
+          await send(config.token, erc20Abi, 'approve', [config.staking, amount]);
+        }
+        msg('Step 2 of 2: stake. Confirm in your wallet…');
+        await send(config.staking, stakingAbi, 'stake', [amount]);
+        msg('Staked. Take it back whenever you like.');
+      } else {
+        if (amount > state.mine.staked) return msg(`You have ${whole(state.mine.staked)} PINKY staked.`, true);
+        msg('Confirm in your wallet…');
+        await send(config.staking, stakingAbi, 'unstake', [amount]);
+        msg('Back in your wallet.');
+      }
+      $('#stakeAmount').value = '';
+    }
+    await readMine();
+    setTimeout(refresh, NODE_GAP_MS);
+  } catch (e) {
+    msg(readable(e), true);
+  }
+}
+for (const kind of ['stake', 'unstake', 'claim']) $(`#${kind}Btn`).onclick = () => poolAction(kind);
 
 // ───────────────────────── start ─────────────────────────
 

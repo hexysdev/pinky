@@ -29,6 +29,7 @@
   <nav>
     <a href="#make">Make a promise</a>
     <a href="#board">Promises</a>
+    <a href="#stake">Stake</a>
     <a href="#how">How it works</a>
   </nav>
   <button id="connect" class="btn ghost">Connect wallet</button>
@@ -71,6 +72,29 @@
     <h2>Promises</h2>
     <p class="sub">Newest first. Anyone can close a promise once its time is up, ask the oracle, and pay it out.</p>
     <div id="cards" class="cards"><p class="empty">Reading the chain…</p></div>
+  </section>
+
+  <section id="stake">
+    <h2>Stake PINKY</h2>
+    <p class="sub">When someone breaks a promise, part of their bond is streamed to PINKY stakers over seven days. No lock: take your tokens back whenever you like.</p>
+    <div class="pool">
+      <dl class="pool-stats">
+        <div><dt>Staked by everyone</dt><dd id="poolTotal">—</dd></div>
+        <div><dt>Streaming to stakers</dt><dd id="poolStream">—</dd></div>
+        <div><dt>Your stake</dt><dd id="myStake">—</dd></div>
+        <div><dt>Yours to claim</dt><dd id="myEarned">—</dd></div>
+      </dl>
+      <p id="stakeWarn" class="warn" hidden></p>
+      <div class="pool-actions">
+        <input id="stakeAmount" inputmode="decimal" placeholder="How many PINKY" autocomplete="off" aria-label="How many PINKY">
+        <button class="btn" id="stakeBtn" type="button">Stake</button>
+        <button class="btn light" id="unstakeBtn" type="button">Unstake</button>
+        <button class="btn light" id="claimBtn" type="button">Claim IMD</button>
+      </div>
+      <p class="fine" id="poolHint"></p>
+      <p id="poolMsg" class="msg"></p>
+    </div>
+    <p class="fine">Fair warning: this pays only when a promise is broken. If everyone keeps their word, stakers earn nothing, and that's the good outcome.</p>
   </section>
 
   <section id="how">
