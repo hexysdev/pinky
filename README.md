@@ -121,8 +121,8 @@ On 2026-10-09 the exact question the vault builds was paid for on Robinhood Chai
 (`0x1e725da5203496444ba7a33cb4a66bb71e82e990c9a9bf823160edc83b0e2b96`, oracle request
 `c5e21f11-5172-4f9b-a506-9babcdfa47c2`). The window held four IMD transfers worth 18.6457 IMD; one,
 6.2152 IMD, came from the address in the filter. The oracle attested 6215220149346698936 wei in
-2 minutes 15 seconds, with the `filter.from` recipe as asked. Four of five panel members agreed at
-a quorum of four, so the launch asks for a panel of seven with a quorum of five.
+2 minutes 15 seconds, with the `filter.from` recipe as asked. That request used a panel of five with
+a quorum of four; the launch asks for a panel of seven with a quorum of five.
 
 That request had no callback. Delivery into the vault is covered by tests against a mock Intake
 and has not run on chain yet.
