@@ -6,6 +6,9 @@
 <title>Pinky — a promise with money behind it</title>
 <meta name="description" content="Deployers pinky-promise not to dump. Pinky holds their IMD until the IdentityMD oracle says they kept their word.">
 <link rel="icon" href="mark.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT,WONK@9..144,400..700,100,1&family=Nunito:wght@400;600;700&display=swap">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -15,23 +18,39 @@
     <span>pinky</span>
   </a>
   <nav>
+    <a href="#make">Make a promise</a>
     <a href="#board">Promises</a>
     <a href="#how">How it works</a>
-    <a href="#make">Make one</a>
   </nav>
   <button id="connect" class="btn ghost">Connect wallet</button>
 </header>
 
 <section class="hero">
-  <div class="wrap">
-    <h1>A promise with money behind it.</h1>
-    <p class="lede">Every deployer says they won't dump. Here they put IMD on it. Keep your word and it comes home. Break it and it doesn't.</p>
-    <dl class="stats" id="stats">
-      <div><dt>Promises made</dt><dd data-stat="made">—</dd></div>
-      <div><dt>Kept</dt><dd data-stat="kept">—</dd></div>
-      <div><dt>Broken</dt><dd data-stat="broken">—</dd></div>
-      <div><dt>IMD on the line</dt><dd data-stat="locked">—</dd></div>
-    </dl>
+  <div class="wrap hero-grid">
+    <div class="pitch">
+      <h1>A promise with money behind it.</h1>
+      <p class="lede">Every deployer says they won't dump. Here they put IMD on it. Keep your word and it comes home. Break it and it doesn't.</p>
+      <dl class="stats" id="stats">
+        <div><dt>Promises made</dt><dd data-stat="made">—</dd></div>
+        <div><dt>Kept</dt><dd data-stat="kept">—</dd></div>
+        <div><dt>Broken</dt><dd data-stat="broken">—</dd></div>
+        <div><dt>IMD on the line</dt><dd data-stat="locked">—</dd></div>
+      </dl>
+    </div>
+
+    <form id="form" class="form">
+      <h2 id="make">Pinky promise?</h2>
+      <p class="fine">It's about your own wallet, the one you connect.</p>
+      <label>Token you won't move<input name="token" placeholder="0x…" autocomplete="off" required></label>
+      <label>At most this many tokens out<input name="maxOut" inputmode="decimal" placeholder="0" value="0" required></label>
+      <label>For how long
+        <span class="row"><input name="duration" inputmode="numeric" value="30" required><select name="unit"><option value="60">minutes</option><option value="3600">hours</option><option value="86400">days</option></select></span>
+      </label>
+      <label>Bond, in IMD<input name="bond" inputmode="decimal" placeholder="5" required></label>
+      <button class="btn pink" id="submit" type="submit">Make the promise</button>
+      <p class="fine" id="formHint">Minimum bond 5 IMD on Robinhood Chain. 10 minutes to 30 days; the oracle has been checked on short terms.</p>
+      <p id="formMsg" class="msg"></p>
+    </form>
   </div>
 </section>
 
@@ -53,22 +72,6 @@
       <li><h3>The number decides</h3><p>Within the limit: the bond goes home. Over it: a tenth goes to whoever asked, and the rest is split between PINKY stakers and a burn.</p></li>
     </ol>
     <p class="fine">A promise covers one wallet and one token, and nobody can pause or edit it once it's made. If the oracle can't answer after three tries, the bond is returned. The contracts are not audited by a third party; read them before you trust them.</p>
-  </section>
-
-  <section id="make">
-    <h2>Make a promise</h2>
-    <p class="sub">It's about your own wallet: the one you connect. The bond is in IMD on Robinhood Chain.</p>
-    <form id="form" class="form">
-      <label>Token you won't move<input name="token" placeholder="0x…" autocomplete="off" required></label>
-      <label>At most this many tokens out<input name="maxOut" inputmode="decimal" placeholder="0" value="0" required></label>
-      <label>For how long
-        <span class="row"><input name="duration" inputmode="numeric" value="30" required><select name="unit"><option value="60">minutes</option><option value="3600">hours</option><option value="86400">days</option></select></span>
-      </label>
-      <label>Bond, in IMD<input name="bond" inputmode="decimal" placeholder="5" required></label>
-      <p class="fine" id="formHint">Minimum bond 5 IMD. Terms run from 10 minutes to 30 days; the oracle has been checked on short ones.</p>
-      <button class="btn" id="submit" type="submit">Make the promise</button>
-      <p id="formMsg" class="msg"></p>
-    </form>
   </section>
 </main>
 

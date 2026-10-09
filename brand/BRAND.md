@@ -19,8 +19,15 @@ thin strokes or text.
 ## Mark
 
 Two hooked pinkies: one ivory, one pink, on wine. Files: `avatar.svg` (400×400, safe inside X's
-round crop) and `banner.svg` (1500×500, X header). The wordmark is set in a system serif for now;
-pick a final typeface before anything is printed or animated.
+round crop) and `banner.svg` (1500×500, X header). PNGs sit next to them.
+
+## Type
+
+- **Fraunces**, weight 600, with the soft and wonky axes on (`'SOFT' 100, 'WONK' 1`): the wordmark, headings,
+  numbers and the sentence on each promise card.
+- **Nunito**: everything else.
+
+Both are open fonts served by Google Fonts. Rounded, a little playful, still readable in a table.
 
 ## Voice
 
