@@ -146,6 +146,22 @@ upgrade path, and the brief asked for none.
 `site/` is the page at pinkybond.fun: static, no build step. It reads the vault in one batched call
 to the public node and sends transactions through the visitor's wallet.
 
-## Open items
+## The first promise, end to end
 
-- The first promise settled end to end on chain, callback included.
+Promise #1, 2026-10-09: the owner wallet bonded 5 IMD on not moving a single PINKY for ten minutes.
+
+| Step | Transaction |
+|---|---|
+| `make` | [`0xc8d8179a…5634`](https://robinhoodchain.blockscout.com/tx/0xc8d8179a4da742e614d7a2c18e687ac0a0c37309e392944184855d846f805634) |
+| `close` | [`0xc5d22119…ad45`](https://robinhoodchain.blockscout.com/tx/0xc5d221197edb40f8a3c8264a375ae5f15415bf5d33415e6dc00d160a4cf0ad45) |
+| `ask` | [`0xec12176c…3f7f`](https://robinhoodchain.blockscout.com/tx/0xec12176ce018b503e1764918d3b8e0542d3dc41557088cb221f97c6ea9653f7f) |
+| verdict, delivered by the Intake | [`0x5933a994…c179`](https://robinhoodchain.blockscout.com/tx/0x5933a9945475b878d9c6b64ab1a9e873e958160333f8b7cb396e197208afc179) |
+| `payout` | [`0xcfe0ba65…1563`](https://robinhoodchain.blockscout.com/tx/0xcfe0ba65fac77958b8fd656e402dd0d26e5ab675fe4055ea8b60bbf1d2091563) |
+
+The oracle (request `dbcac6c2-6328-47a9-8e07-4c7b55f78e45`) summed the wallet's outgoing PINKY over
+blocks 84272522–84278497 and attested 0: kept. 4.5 IMD went home, 0.5 IMD paid for the question.
+The callback used 104,652 gas in all, inside the Intake's 200,000.
+
+Two things this run showed. The answer took 11 minutes 18 seconds, against 2 minutes 15 for the
+earlier test: verdicts take minutes, not seconds. And five of seven panel members agreed at a
+quorum of five, the second run in a row to settle with no member to spare.
