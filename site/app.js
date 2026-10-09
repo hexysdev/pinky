@@ -309,7 +309,16 @@ function squeeze() {
 
 // ───────────────────────── actions ─────────────────────────
 
-$('#connect').onclick = () => connect().catch((e) => { $('#formMsg').textContent = readable(e); $('#formMsg').className = 'msg bad'; });
+// "Make a promise" in the menu: go to the form only if it is not already in view, then start typing.
+document.querySelector('nav a[href="#make"]').addEventListener('click', (ev) => {
+  ev.preventDefault();
+  const form = $('#form');
+  const box = form.getBoundingClientRect();
+  if (box.top < 70 || box.bottom > innerHeight) form.scrollIntoView({ block: 'center' });
+  form.elements.token.focus({ preventScroll: true });
+});
+
+$('#connect').onclick =() => connect().catch((e) => { $('#formMsg').textContent = readable(e); $('#formMsg').className = 'msg bad'; });
 
 $('#cards').addEventListener('click', async (ev) => {
   const btn = ev.target.closest('button[data-act]');

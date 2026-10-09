@@ -39,8 +39,11 @@ h1, h2, .brand, .stats dd, .card p.say { font-family: var(--display); font-varia
 .btn.light { background: transparent; color: var(--wine); }
 .btn.light:hover { background: var(--ivory); }
 
-.hero { position: relative; overflow: hidden; background: var(--wine); color: var(--ivory); padding: 56px 0 56px; }
+.hero { position: relative; background: var(--wine); color: var(--ivory); padding: 56px 0 56px; }
 .hero-grid { position: relative; }
+/* The oversized mark is clipped by its own box, not by the hero: a hero with hidden overflow
+   becomes a scroll container, and a link to the form inside it scrolls the hero itself. */
+.hero-bg { position: absolute; inset: 0; overflow: hidden; overflow: clip; pointer-events: none; }
 
 /* Two hooked pinkies behind the headline: they find each other once, then breathe. */
 .hero-hooks { position: absolute; left: 50%; top: 50%; height: 150%; transform: translate(-62%, -50%); opacity: .09; pointer-events: none; overflow: visible; }
