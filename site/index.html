@@ -79,7 +79,7 @@
       <li><h3>Put IMD on it</h3><p>A deployer picks a token, a limit and a deadline, and locks IMD behind one sentence: <em>my wallet won't move more than this before then.</em></p></li>
       <li><h3>Time runs out</h3><p>Anyone closes the promise. That fixes the exact block range it covered, start to finish.</p></li>
       <li><h3>The swarm counts</h3><p>The contract pays the IdentityMD oracle 0.5 IMD out of the bond. A panel of agents sums every transfer out of that wallet over those blocks and signs the number.</p></li>
-      <li><h3>The number decides</h3><p>Within the limit: the bond goes home. Over it: a tenth goes to whoever asked, and the rest is split between PINKY stakers and a burn.</p></li>
+      <li><h3>The number decides</h3><p>Within the limit: the bond goes home. Over it: a tenth goes to the first watcher who asked, and the rest is split between PINKY stakers and a burn.</p></li>
     </ol>
     <p class="fine">A promise covers one wallet and one token, and nobody can pause or edit it once it's made. If the oracle can't answer after three tries, the bond is returned. The contracts are not audited by a third party; read them before you trust them.</p>
   </section>
