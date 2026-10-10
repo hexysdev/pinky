@@ -159,6 +159,11 @@ h3 { font: 700 18px/1.3 var(--sans); margin: 0 0 4px; }
 .who-list p { margin: 0; font: 400 19px/1.4 var(--display); font-variation-settings: 'SOFT' 100, 'WONK' 0; }
 .who-list em { font-style: normal; }
 
+.get { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; margin-top: 18px; }
+.get .btn { text-decoration: none; }
+.get .share { margin-left: 0; }
+.get .fine { flex-basis: 100%; }
+
 .steps { list-style: none; counter-reset: step; padding: 0; margin: 20px 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 .steps li { counter-increment: step; background: var(--paper); border: 1px solid var(--line); border-radius: 20px; padding: 18px 22px 16px; }
 .steps li::before { content: counter(step); display: inline-grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: var(--pink); font: 600 17px var(--display); margin-bottom: 8px; }
@@ -201,3 +206,4 @@ h3 { font: 700 18px/1.3 var(--sans); margin: 0 0 4px; }
 }
 
 .fine + .fine { margin-top: 8px; }
+.get[hidden] { display: none; }

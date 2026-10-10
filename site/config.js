@@ -8,6 +8,9 @@ export const config = {
   vault: '0x3c81384aa1ca064316576a214e2fb30969992772',
   staking: '0x17fb2067652bcf4803e937cf323a248ff6b7cba3',
   token: '0xb125c461c00863aacad4cc99311d2f23d4342a6f',
+  // Opens Uniswap on Robinhood Chain with ETH → PINKY filled in.
+  buy: 'https://app.uniswap.org/swap?chain=robinhood&inputCurrency=NATIVE&outputCurrency=0xb125c461c00863aacad4cc99311d2f23d4342a6f',
+  verified: 'https://repo.sourcify.dev/4663/0xb125c461c00863aacad4cc99311d2f23d4342a6f',
   github: 'https://github.com/hexysdev/pinky',
   // The footer shows this link only when it is set.
   x: 'https://x.com/pinkybond_fun',

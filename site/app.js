@@ -679,6 +679,21 @@ async function poolAction(kind) {
 }
 for (const kind of ['stake', 'unstake', 'claim']) $(`#${kind}Btn`).onclick = () => poolAction(kind);
 
+// Where to get the token, and its address to check against whatever the swap page shows.
+$('.get').hidden = !config.token || !config.buy;
+$('#buy').href = config.buy;
+$('#verified').href = config.verified;
+$('#copyToken').onclick = async () => {
+  const btn = $('#copyToken');
+  try {
+    await navigator.clipboard.writeText(config.token);
+    btn.textContent = 'Copied';
+  } catch {
+    btn.textContent = config.token;
+  }
+  setTimeout(() => { btn.textContent = 'Copy token address'; }, 2500);
+};
+
 // ───────────────────────── start ─────────────────────────
 
 if (state.preview) {
