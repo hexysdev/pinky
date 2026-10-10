@@ -101,7 +101,12 @@ h3 { font: 700 18px/1.3 var(--sans); margin: 0 0 4px; }
 .term i { display: block; height: 100%; width: 0; border-radius: 999px; background: var(--pink); transition: width 1s linear; }
 
 /* The mark on each card: hooked while the promise holds, pulled apart when it breaks. */
-.hooks { width: 20px; height: 24px; margin-left: auto; align-self: center; overflow: visible; }
+.hooks { width: 20px; height: 24px; margin-left: 12px; align-self: center; overflow: visible; }
+.share { margin-left: auto; padding: 2px 0; border: 0; background: none; color: var(--ink-soft); font: 600 13px var(--sans); text-decoration: underline; text-decoration-color: var(--pink); text-underline-offset: 3px; cursor: pointer; }
+.share:hover, .share:focus-visible { color: var(--wine); outline: none; }
+/* The promise a link pointed at. */
+.card.linked { border-color: var(--pink-deep); box-shadow: 0 0 0 3px var(--pink); }
+.card { scroll-margin-top: 90px; }
 .hooks .h1 { stroke: var(--wine); }
 .hooks .h2 { stroke: var(--pink-deep); }
 .hooks path { transition: transform .6s cubic-bezier(.3, 1.4, .5, 1); }

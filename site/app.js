@@ -231,8 +231,8 @@ function render() {
       const fresh = mark && Date.now() < mark.until ? mark.cls : '';
       const start = state.starts[p.id];
       const bar = d.running && start ? `<div class="term"><i data-term="${start},${Number(p.endTime)}"></i></div>` : '';
-      return `<article class="card ${fresh}">
-        <div class="card-head"><span class="badge ${d.badge[0]}">${d.badge[1]}</span><span class="id">#${p.id}</span>${hooks(status === 'Broken' ? 'apart' : status === 'Refunded' ? 'idle' : '')}</div>
+      return `<article class="card ${fresh}${linkedId() === p.id ? ' linked' : ''}" id="p${p.id}">
+        <div class="card-head"><span class="badge ${d.badge[0]}">${d.badge[1]}</span><span class="id">#${p.id}</span><button class="share" type="button" data-share="${p.id}">Copy link</button>${hooks(status === 'Broken' ? 'apart' : status === 'Refunded' ? 'idle' : '')}</div>
         <p class="say">${d.say}</p>
         ${bar}
         <div class="meta">
@@ -249,6 +249,7 @@ function render() {
     state.drawn = html;
     cards.innerHTML = html;
   }
+  showLinked();
   const stat =(k, v) => { $(`[data-stat="${k}"]`).textContent = v; };
   stat('made', state.total ?? 0);
   stat('kept', state.promises.filter((p) => STATUS[p.status] === 'Kept').length);
@@ -447,7 +448,38 @@ document.querySelector('nav a[href="#make"]').addEventListener('click', (ev) => 
 
 $('#connect').onclick =() => connect().catch((e) => { $('#formMsg').textContent = readable(e); $('#formMsg').className = 'msg bad'; });
 
+// A promise has its own address: pinkybond.fun/#p2 opens the board at that card.
+const promiseUrl = (id) => `${location.origin}${location.pathname}#p${id}`;
+function linkedId() {
+  const m = /^#p(\d+)$/.exec(location.hash);
+  return m ? Number(m[1]) : null;
+}
+let shownLinked = null;
+function showLinked() {
+  const id = linkedId();
+  const card = id && document.getElementById(`p${id}`);
+  if (!card || shownLinked === id) return;
+  shownLinked = id;
+  // Jump, don't glide: the visitor came for this card, and a background tab never finishes a glide.
+  card.scrollIntoView({ block: 'center', behavior: 'instant' });
+}
+window.addEventListener('hashchange', () => { shownLinked = null; render(); showLinked(); });
+
 $('#cards').addEventListener('click', async (ev) => {
+  const share = ev.target.closest('button[data-share]');
+  if (share) {
+    const url = promiseUrl(share.dataset.share);
+    try {
+      await navigator.clipboard.writeText(url);
+      share.textContent = 'Copied';
+    } catch {
+      // No clipboard permission: put the address in the bar, where it can be copied by hand.
+      history.replaceState(null, '', url);
+      share.textContent = 'Link is in the address bar';
+    }
+    setTimeout(() => { share.textContent = 'Copy link'; }, 2000);
+    return;
+  }
   const btn = ev.target.closest('button[data-act]');
   if (!btn) return;
   if (state.preview) { btn.textContent = 'Preview only'; return; }
