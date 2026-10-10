@@ -92,6 +92,8 @@ h3 { font: 700 18px/1.3 var(--sans); margin: 0 0 4px; }
 .card .who a { text-decoration-color: var(--pink); }
 .card .meta { display: flex; flex-wrap: wrap; gap: 6px 20px; font-size: 14px; color: var(--ink-soft); }
 .card .meta b { color: var(--wine); font-weight: 700; }
+.card .cover { margin: 0; padding: 8px 12px; background: #F3EAD6; border-radius: 10px; font-size: 14px; color: var(--ink-soft); }
+.card .cover b { color: var(--wine); }
 .card .actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
 .empty { color: var(--ink-soft); }
 .card .actions .fine b { color: var(--wine); font-variant-numeric: tabular-nums; }

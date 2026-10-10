@@ -28,6 +28,7 @@ const erc20Abi = [
   { type: 'function', name: 'symbol', stateMutability: 'view', inputs: [], outputs: [{ type: 'string' }] },
   { type: 'function', name: 'decimals', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint8' }] },
   { type: 'function', name: 'allowance', stateMutability: 'view', inputs: [{ type: 'address' }, { type: 'address' }], outputs: [{ type: 'uint256' }] },
+  { type: 'function', name: 'balanceOf', stateMutability: 'view', inputs: [{ type: 'address' }], outputs: [{ type: 'uint256' }] },
   { type: 'function', name: 'approve', stateMutability: 'nonpayable', inputs: [{ type: 'address' }, { type: 'uint256' }], outputs: [{ type: 'bool' }] },
 ];
 
@@ -44,6 +45,12 @@ const stakingAbi = [
 
 const state = {
   account: null, promises: [], minBond: 5n * 10n ** 18n, preview: !config.vault,
+  // For running promises: what the maker's wallet holds of the token (by promise id), and market
+  // prices in dollars (by token address). Together they say how much the bond is worth next to
+  // what it is guarding.
+  balances: {},
+  prices: {},
+  pricesAt: 0,
   // The staking pool as everyone sees it, and the connected wallet's place in it.
   pool: { totalStaked: 0n, rewardRate: 0n, periodFinish: 0 },
   mine: null,
@@ -92,7 +99,13 @@ async function readBoard() {
     { ...pool, functionName: 'totalStaked' }, { ...pool, functionName: 'rewardRate' }, { ...pool, functionName: 'periodFinish' },
   ];
   for (let id = 1; id <= PAGE; id++) calls.push({ ...vault, functionName: 'promises', args: [BigInt(id)] });
-  const [count, minBond, totalStaked, rewardRate, periodFinish, ...rows] = await nodeBatch(calls);
+  // Running promises seen last time: ask what their makers hold now, in the same request.
+  const watched = state.promises.filter((p) => STATUS[p.status] === 'Active');
+  for (const p of watched) calls.push({ to: p.token, abi: erc20Abi, functionName: 'balanceOf', args: [p.maker] });
+  const out = await nodeBatch(calls);
+  const [count, minBond, totalStaked, rewardRate, periodFinish] = out;
+  const rows = out.slice(5, 5 + PAGE);
+  watched.forEach((p, i) => { const held = out[5 + PAGE + i]; if (held !== null) state.balances[p.id] = held; });
   if (count === null) throw new Error('the vault did not answer');
   if (minBond) state.minBond = minBond;
   if (totalStaked !== null) state.pool = { totalStaked, rewardRate: rewardRate ?? 0n, periodFinish: Number(periodFinish ?? 0n) };
@@ -105,13 +118,21 @@ async function readBoard() {
 async function readExtras() {
   const tokens = [...new Set(state.promises.map((p) => p.token.toLowerCase()))].filter((t) => !state.tokens[t]);
   const running = state.promises.filter((p) => STATUS[p.status] === 'Active' && !state.starts[p.id]);
-  if (!tokens.length && !running.length) return false;
+  // A promise seen for the first time has no balance yet; later ones ride along with the board.
+  const unsized = state.promises.filter((p) => STATUS[p.status] === 'Active' && state.balances[p.id] === undefined);
+  if (!tokens.length && !running.length && !unsized.length) return false;
   await new Promise((ok) => setTimeout(ok, NODE_GAP_MS));
   const calls = tokens.flatMap((to) => [{ to, abi: erc20Abi, functionName: 'symbol' }, { to, abi: erc20Abi, functionName: 'decimals' }]);
+  const held = unsized.map((p) => ({ to: p.token, abi: erc20Abi, functionName: 'balanceOf', args: [p.maker] }));
   const out = await rpc([
     ...calls.map(asCall),
     ...running.map((p) => ({ method: 'eth_getBlockByNumber', params: [`0x${BigInt(p.startBlock).toString(16)}`, false] })),
+    ...held.map(asCall),
   ]);
+  unsized.forEach((p, i) => {
+    const value = decode(held[i], out[calls.length + running.length + i]);
+    if (value !== null) state.balances[p.id] = value;
+  });
   tokens.forEach((t, i) => {
     const decimals = decode(calls[2 * i + 1], out[2 * i + 1]);
     if (decimals !== null) state.tokens[t] = { symbol: decode(calls[2 * i], out[2 * i]) ?? '', decimals: Number(decimals) };
@@ -125,6 +146,47 @@ async function readExtras() {
   return true;
 }
 
+/**
+ * Dollar prices for the tokens of running promises and for IMD, from DexScreener: the deepest
+ * pool on this chain where the token is the base. Not a node request, and kept for five minutes.
+ */
+async function readPrices() {
+  const wanted = [...new Set(state.promises.filter((p) => STATUS[p.status] === 'Active').map((p) => p.token.toLowerCase()))];
+  if (!wanted.length || Date.now() - state.pricesAt < 300_000) return false;
+  state.pricesAt = Date.now();
+  const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${[...wanted, config.imd.toLowerCase()].slice(0, 30).join(',')}`);
+  if (!res.ok) return false;
+  const best = {};
+  for (const pair of (await res.json()).pairs ?? []) {
+    const token = pair.baseToken?.address?.toLowerCase();
+    const price = Number(pair.priceUsd);
+    const depth = Number(pair.liquidity?.usd ?? 0);
+    if (pair.chainId !== 'robinhood' || !token || !(price > 0)) continue;
+    if (!best[token] || depth > best[token].depth) best[token] = { price, depth };
+  }
+  state.prices = Object.fromEntries(Object.entries(best).map(([t, v]) => [t, v.price]));
+  return true;
+}
+
+/** How the bond compares with what the wallet could still move. Only for a running promise. */
+function cover(p) {
+  const meta = state.tokens[p.token.toLowerCase()];
+  const held = state.balances[p.id];
+  if (STATUS[p.status] !== 'Active' || !meta || held === undefined) return '';
+  const atStake = held > p.maxOut ? held - p.maxOut : 0n;
+  if (atStake === 0n) return "Right now this wallet holds no more than the limit, so there's nothing here to break.";
+  const tokenUsd = state.prices[p.token.toLowerCase()];
+  const imdUsd = state.prices[config.imd.toLowerCase()];
+  if (!tokenUsd || !imdUsd) return `This wallet could move ${amount(p, atStake)}. There's no market price for it, so the bond can't be weighed against that.`;
+  const stakeUsd = Number(formatUnits(atStake, meta.decimals)) * tokenUsd;
+  const share = (Number(formatUnits(p.bond, 18)) * imdUsd) / stakeUsd;
+  const dollars = stakeUsd.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: stakeUsd < 100 ? 2 : 0 });
+  const what = `the ${amount(p, atStake)} this wallet could move, about ${dollars} at the last pool price`;
+  if (share >= 1) return `The bond is worth <b>more than</b> ${what}.`;
+  const pct = share < 0.01 ? 'less than 1%' : `${Math.round(share * 100)}%`;
+  return `The bond is worth <b>${pct}</b> of ${what}.`;
+}
+
 const previewSince = Math.floor(Date.now() / 1000);
 
 function previewData() {
@@ -134,6 +196,8 @@ function previewData() {
   const base = { token: t, attempts: 1, paid: false, asker: '0x0000000000000000000000000000000000000000', observedOut: 0n };
   const e18 = 10n ** 18n;
   state.starts[4] = previewSince - 300;
+  state.balances[4] = 12000000n * e18;
+  state.prices = { [t]: 0.00002, [config.imd.toLowerCase()]: 8.5 };
   state.pool = { totalStaked: 31400000n * e18, rewardRate: 22n * e18 / 604800n, periodFinish: previewSince + 5 * 86400 };
   // The third example gets its verdict a few seconds in, so the preview shows a promise being kept.
   const counted = now - previewSince >= 12;
@@ -240,6 +304,7 @@ function render() {
           <span>Bond <b>${imd(p.bond)} IMD</b></span>
           <span>Deadline <b>${new Date(Number(p.endTime) * 1000).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })}</b></span>
         </div>
+        ${cover(p) ? `<p class="cover">${cover(p)}</p>` : ''}
         <div class="actions"><span class="fine">${d.note}</span>${d.action ? `<button class="btn small light" data-act="${d.action[0]}" data-id="${p.id}">${d.action[1]}</button>` : ''}</div>
       </article>`;
     }).join('');
@@ -310,6 +375,7 @@ async function refresh() {
     if (state.preview) previewData(); else await readBoard();
     render();
     if (!state.preview && await readExtras()) render();
+    if (!state.preview && await readPrices().catch(() => false)) render();
     readMine().catch(() => {});
   } catch (e) {
     if (!state.promises.length) $('#cards').innerHTML = `<p class="empty">Couldn't read the chain: ${esc(e.message)}. Try again in a minute.</p>`;
