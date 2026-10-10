@@ -327,9 +327,64 @@ function watch() {
 
 const chainHex = `0x${config.chainId.toString(16)}`;
 
+// Every wallet extension wants to be `window.ethereum`, and with two installed the last one to load
+// wins. EIP-6963 lets each announce itself instead, so the visitor picks.
+const wallets = new Map();
+window.addEventListener('eip6963:announceProvider', (ev) => {
+  const { info, provider } = ev.detail ?? {};
+  if (info?.uuid && provider) wallets.set(info.uuid, { info, provider });
+});
+window.dispatchEvent(new Event('eip6963:requestProvider'));
+
+/** The wallet in use. Set by `connect`; everything that signs or reads through a wallet goes here. */
+let ethereum = null;
+
+function chooseWallet() {
+  const found = [...wallets.values()];
+  if (found.length === 0) {
+    if (!window.ethereum) throw new Error('No wallet found in this browser.');
+    return Promise.resolve(window.ethereum);
+  }
+  if (found.length === 1) return Promise.resolve(found[0].provider);
+  return new Promise((resolve, reject) => {
+    const dialog = $('#wallets');
+    const list = $('#walletList');
+    list.replaceChildren(...found.map(({ info, provider }) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'wallet';
+      // Icons are data URIs the wallet supplies; anything else is not loaded.
+      if (/^data:image\//.test(info.icon ?? '')) {
+        const img = document.createElement('img');
+        img.src = info.icon;
+        img.alt = '';
+        btn.append(img);
+      }
+      btn.append(document.createTextNode(info.name ?? 'Wallet'));
+      btn.onclick = () => { dialog.close('picked'); resolve(provider); };
+      return btn;
+    }));
+    dialog.onclose = () => { if (dialog.returnValue !== 'picked') reject(new Error('No wallet chosen.')); };
+    dialog.returnValue = '';
+    dialog.showModal();
+  });
+}
+
+function onAccounts(accounts) {
+  state.account = accounts[0] ? getAddress(accounts[0]) : null;
+  state.mine = null;
+  $('#connect').textContent = state.account ? short(state.account) : 'Connect wallet';
+  renderPool();
+  readMine().catch(() => {});
+}
+
 async function connect() {
-  if (!window.ethereum) throw new Error('No wallet found in this browser.');
+  const chosen = await chooseWallet();
+  if (ethereum && ethereum !== chosen) ethereum.removeListener?.('accountsChanged', onAccounts);
+  ethereum = chosen;
   const [account] = await ethereum.request({ method: 'eth_requestAccounts' });
+  ethereum.removeListener?.('accountsChanged', onAccounts);
+  ethereum.on?.('accountsChanged', onAccounts);
   try {
     await ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: chainHex }] });
   } catch (e) {
@@ -339,10 +394,7 @@ async function connect() {
       nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
     }] });
   }
-  state.account = getAddress(account);
-  $('#connect').textContent = short(state.account);
-  renderPool();
-  readMine().catch(() => {});
+  onAccounts([account]);
   return state.account;
 }
 
