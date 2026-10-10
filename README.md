@@ -2,8 +2,9 @@
 
 A promise with money behind it.
 
-Every deployer says they won't dump. Pinky lets them prove it. A deployer locks IMD behind a
-promise: *"my wallet will not move more than `maxOut` of this token before the deadline."* When
+Anyone can say they won't sell. Pinky lets them prove it. A holder — a deployer, a whale, someone
+paid in tokens to promote them — locks IMD behind a promise: *"my wallet will not move more than
+`maxOut` of this token before the deadline."* When
 time is up, the contract buys one answer from the IdentityMD oracle out of the bond — the sum of
 the wallet's outgoing `Transfer` values over the exact block range — and that answer decides
 where the bond goes. Keep your word and the IMD comes home. Break it and it doesn't.
@@ -25,7 +26,7 @@ oracle conformance vector). No third-party audit.
 
 ## How it works
 
-1. **make** — the deployer calls `PinkyVault.make(token, maxOut, duration, bond)`. The vault
+1. **make** — the holder calls `PinkyVault.make(token, maxOut, duration, bond)`. The vault
    pulls `bond` IMD, which must cover three oracle fees at the Intake's current quote, and records
    the current block. While the Intake quotes no price for the configured action (it is not sold
    yet, or no longer), `make` refuses, since such a promise could never be settled.
@@ -98,7 +99,7 @@ v5.5.0, forge-std v1.9.7); nothing is downloaded at build time.
   consumer reference asks, even for chain evidence where the oracle's own rerun settled a split.
   Each refused answer costs a fee, and after three, or a week, the bond is refunded. The launch's
   panel of seven with a quorum of five tolerates a split of two.
-- **One wallet.** A promise covers one wallet and one token. Tokens the deployer holds elsewhere
+- **One wallet.** A promise covers one wallet and one token. Tokens the maker holds elsewhere
   are not covered.
 - **No answer favours the maker.** If the oracle cannot answer, the bond is refunded. A maker who
   could make the question unanswerable would get their bond back. Anyone may re-ask after a day;
@@ -113,6 +114,10 @@ v5.5.0, forge-std v1.9.7); nothing is downloaded at build time.
   launch, one live request over a window of several days' blocks should be run, and if the oracle
   has a limit, `MAX_DURATION` capped to it.
 - **Standard tokens only.** Rebasing or fee-on-transfer tokens are out of scope.
+- **Not for NFTs.** The question sums the `value` of `Transfer` events. ERC-721 puts a token id
+  there instead of an amount and ERC-1155 uses other events, so a promise about an NFT would be
+  judged on nothing and could come back "kept" whatever the maker did. The vault itself does not
+  refuse an NFT address; the site's form does.
 - **Gas-limited payout.** The staker share is sent in a `try`; if it fails, that share is burned.
 
 ## Checked against the live oracle

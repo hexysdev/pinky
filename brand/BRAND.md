@@ -38,7 +38,7 @@ A friend who makes sure nobody gets played. Short, human, a little dry. Numbers 
 | New promise | Someone just put 20 IMD on not selling for an hour. We'll see. |
 | Kept | Kept their word. 20 IMD goes home. |
 | Broken | They sold. The pinky's broken, and so is the 20 IMD. |
-| Bio | Deployers pinky-promise not to dump. We hold their IMD until they prove it. |
+| Bio | Say you won't sell, and put IMD on it. We hold it until you've kept your word. |
 | Empty list | No promises yet. Be the first to mean it. |
 
 Avoid: "revolutionary", "to the moon", exclamation marks, lecturing, and the word "jeet".

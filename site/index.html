@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pinky — a promise with money behind it</title>
-<meta name="description" content="Deployers pinky-promise not to dump. Pinky holds their IMD until the IdentityMD oracle says they kept their word.">
+<meta name="description" content="Say you won&#39;t sell, and put IMD on it. Pinky holds the bond until the IdentityMD oracle says you kept your word.">
 <link rel="canonical" href="https://pinkybond.fun/">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://pinkybond.fun/">
 <meta property="og:title" content="Pinky — a promise with money behind it">
-<meta property="og:description" content="Deployers pinky-promise not to dump. Pinky holds their IMD until the IdentityMD oracle says they kept their word.">
+<meta property="og:description" content="Say you won&#39;t sell, and put IMD on it. Pinky holds the bond until the IdentityMD oracle says you kept your word.">
 <meta property="og:image" content="https://pinkybond.fun/og.png">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="theme-color" content="#5E1224">
@@ -39,7 +39,7 @@
   <div class="wrap hero-grid">
     <div class="pitch">
       <h1>A promise with money behind it.</h1>
-      <p class="lede">Every deployer says they won't dump. Here they <mark>put IMD on it.</mark> Keep your word and it comes home. Break it and it doesn't.</p>
+      <p class="lede">Anyone can say they won't sell. Here you <mark>put IMD on it.</mark> Keep your word and it comes home. Break it and it doesn't.</p>
       <dl class="stats" id="stats">
         <div><dt>Promises made</dt><dd data-stat="made">—</dd></div>
         <div><dt>Kept</dt><dd data-stat="kept">—</dd></div>
@@ -96,15 +96,25 @@
     <p class="fine">Fair warning: this pays only when a promise is broken. If everyone keeps their word, stakers earn nothing, and that's the good outcome.</p>
   </section>
 
+  <section id="who">
+    <h2>Whose word?</h2>
+    <p class="sub">Anyone who holds a token and wants to be believed when they say they'll keep holding it.</p>
+    <ul class="who-list">
+      <li><h3>The one who launched it</h3><p><em>“The team's tokens stay put for the first week.”</em></p></li>
+      <li><h3>The one who holds a lot</h3><p><em>“I'm not selling into this. Watch my wallet.”</em></p></li>
+      <li><h3>The one who was paid in it</h3><p><em>“I got these for the post. I'm holding them for a month.”</em></p></li>
+    </ul>
+  </section>
+
   <section id="how">
     <h2>How it works</h2>
     <ol class="steps">
-      <li><h3>Put IMD on it</h3><p>A deployer picks a token, a limit and a deadline, and locks IMD behind one sentence: <em>my wallet won't move more than this before then.</em></p></li>
+      <li><h3>Put IMD on it</h3><p>Pick a token you hold, a limit and a deadline, and lock IMD behind one sentence: <em>my wallet won't move more than this before then.</em></p></li>
       <li><h3>Time runs out</h3><p>Anyone closes the promise. That fixes the exact block range it covered, start to finish.</p></li>
       <li><h3>The swarm counts</h3><p>The contract pays the IdentityMD oracle 0.5 IMD out of the bond. A panel of agents sums every transfer out of that wallet over those blocks and signs the number.</p></li>
       <li><h3>The number decides</h3><p>Within the limit: the bond goes home. Over it: a tenth goes to the first watcher who asked, and the rest is split between PINKY stakers and a burn.</p></li>
     </ol>
-    <p class="fine">A promise covers one wallet and one token, and nobody can pause or edit it once it's made. If the oracle can't answer after three tries, the bond is returned.</p>
+    <p class="fine">A promise covers one wallet and one ordinary token (ERC-20; NFTs aren't supported yet), and nobody can pause or edit it once it's made. If the oracle can't answer after three tries, the bond is returned.</p>
     <p class="fine">Before launch the IdentityMD swarm audited the contracts: one audit of the code as written, four specialist audits and a judge. What they found was fixed, and <a href="https://github.com/hexysdev/pinky/blob/main/ADAPTATION.md" target="_blank" rel="noopener">the list is public</a>. That is a review by AI agents, not an audit by an outside firm, so read the contracts before you trust them.</p>
   </section>
 </main>

@@ -607,7 +607,15 @@ $('#form').addEventListener('submit', async (ev) => {
   $('#submit').disabled = true;
   try {
     if (!state.account) await connect();
-    const decimals = Number(await walletCall(token, erc20Abi, 'decimals'));
+    // An ordinary token says how many decimals it has; an NFT does not. The vault's question to
+    // the oracle sums transfer amounts, which NFTs do not have, so a promise about one would be
+    // judged on nothing.
+    let decimals;
+    try {
+      decimals = Number(await walletCall(token, erc20Abi, 'decimals'));
+    } catch {
+      throw new Error("That address isn't an ordinary token. NFTs aren't supported yet.");
+    }
     const maxOut = parseUnits(f.maxOut.value.trim() || '0', decimals);
     const bond = parseUnits(f.bond.value.trim(), 18);
     if (bond < state.minBond) throw new Error(`The bond has to be at least ${imd(state.minBond)} IMD.`);
