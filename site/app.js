@@ -448,8 +448,9 @@ document.querySelector('nav a[href="#make"]').addEventListener('click', (ev) => 
 
 $('#connect').onclick =() => connect().catch((e) => { $('#formMsg').textContent = readable(e); $('#formMsg').className = 'msg bad'; });
 
-// A promise has its own address: pinkybond.fun/#p2 opens the board at that card.
-const promiseUrl = (id) => `${location.origin}${location.pathname}#p${id}`;
+// A promise has its own address. /p/2/ is a small page with that promise's link preview, built by
+// tools/build-previews.mjs; it sends people on to /#p2, which opens the board at that card.
+const promiseUrl = (id) => `${location.origin}/p/${id}/`;
 function linkedId() {
   const m = /^#p(\d+)$/.exec(location.hash);
   return m ? Number(m[1]) : null;

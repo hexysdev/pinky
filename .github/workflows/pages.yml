@@ -3,7 +3,10 @@ name: Publish the site
 on:
   push:
     branches: [main]
-    paths: ['site/**', '.github/workflows/pages.yml']
+    paths: ['site/**', 'tools/build-previews.mjs', '.github/workflows/pages.yml']
+  # Link previews show a promise's status, so they are rebuilt from the chain through the day.
+  schedule:
+    - cron: '7,27,47 * * * *'
   workflow_dispatch:
 
 permissions:
@@ -13,7 +16,7 @@ permissions:
 
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   deploy:
@@ -23,6 +26,14 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build a page and a preview image for every promise
+        run: node tools/build-previews.mjs
+        env:
+          # A scheduled run that cannot read the chain fails and leaves the live site alone.
+          PREVIEWS_REQUIRED: ${{ github.event_name == 'schedule' && '1' || '0' }}
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
