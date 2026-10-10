@@ -117,9 +117,12 @@
 </footer>
 
 <dialog id="wallets" class="wallets">
-  <h2>Which wallet?</h2>
+  <h2 id="walletsTitle">Which wallet?</h2>
   <div id="walletList" class="wallet-list"></div>
-  <form method="dialog"><button class="btn light small" value="cancel">Cancel</button></form>
+  <form method="dialog" class="wallets-foot">
+    <button class="btn light small" value="cancel">Cancel</button>
+    <button class="btn small" id="walletOff" type="button" hidden>Disconnect</button>
+  </form>
 </dialog>
 
 <script type="module" src="app.js"></script>

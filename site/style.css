@@ -161,6 +161,8 @@ h3 { font: 700 18px/1.3 var(--sans); margin: 0 0 4px; }
 .wallets::backdrop { background: rgba(74, 13, 28, .55); }
 .wallets h2 { font-size: 28px; margin: 0 0 14px; }
 .wallet-list { display: grid; gap: 8px; margin-bottom: 14px; }
+.wallet-list:empty { display: none; }
+.wallets-foot { display: flex; gap: 8px; flex-wrap: wrap; justify-content: space-between; }
 .wallet { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 14px; border: 2px solid var(--line); border-radius: 14px; background: #fff; color: var(--wine); font: 700 16px var(--sans); cursor: pointer; text-align: left; }
 .wallet:hover, .wallet:focus-visible { border-color: var(--pink); outline: none; }
 .wallet img, .wallet-initial { flex: none; width: 28px; height: 28px; border-radius: 8px; }

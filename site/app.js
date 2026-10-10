@@ -340,16 +340,27 @@ window.dispatchEvent(new Event('eip6963:requestProvider'));
 /** The wallet in use. Set by `connect`; everything that signs or reads through a wallet goes here. */
 let ethereum = null;
 
-function chooseWallet() {
+/**
+ * Resolves with the wallet to use. With `manage` (someone is already connected) the list always
+ * opens, so they can switch, and it carries a Disconnect button that resolves with null.
+ */
+function chooseWallet(manage = false) {
   const found = [...wallets.values()];
-  if (found.length === 0) {
-    if (!window.ethereum) throw new Error('No wallet found in this browser.');
-    return Promise.resolve(window.ethereum);
+  if (!manage) {
+    if (found.length === 0) {
+      if (!window.ethereum) throw new Error('No wallet found in this browser.');
+      return Promise.resolve(window.ethereum);
+    }
+    if (found.length === 1) return Promise.resolve(found[0].provider);
   }
-  if (found.length === 1) return Promise.resolve(found[0].provider);
   return new Promise((resolve, reject) => {
     const dialog = $('#wallets');
     const list = $('#walletList');
+    $('#walletsTitle').textContent = manage ? 'Your wallet' : 'Which wallet?';
+    const off = $('#walletOff');
+    off.hidden = !manage;
+    off.textContent = manage ? `Disconnect ${short(state.account)}` : '';
+    off.onclick = () => { dialog.close('picked'); resolve(null); };
     list.replaceChildren(...found.map(({ info, provider }) => {
       const btn = document.createElement('button');
       btn.type = 'button';
@@ -374,7 +385,11 @@ function chooseWallet() {
       btn.onclick = () => { dialog.close('picked'); resolve(provider); };
       return btn;
     }));
-    dialog.onclose = () => { if (dialog.returnValue !== 'picked') reject(new Error('No wallet chosen.')); };
+    dialog.onclose = () => {
+      if (dialog.returnValue === 'picked') return;
+      // Closing the list while connected is not a failure, so nothing should be reported.
+      reject(Object.assign(new Error('No wallet chosen.'), { silent: manage }));
+    };
     dialog.returnValue = '';
     dialog.showModal();
   });
@@ -388,8 +403,19 @@ function onAccounts(accounts) {
   readMine().catch(() => {});
 }
 
+async function disconnect() {
+  const old = ethereum;
+  old?.removeListener?.('accountsChanged', onAccounts);
+  ethereum = null;
+  onAccounts([]);
+  // Ask the wallet to forget this site as well. Not every wallet knows how, and that is fine:
+  // the page has let go either way.
+  try { await old?.request({ method: 'wallet_revokePermissions', params: [{ eth_accounts: {} }] }); } catch { /* unsupported */ }
+}
+
 async function connect() {
-  const chosen = await chooseWallet();
+  const chosen = await chooseWallet(!!state.account);
+  if (chosen === null) return disconnect();
   if (ethereum && ethereum !== chosen) ethereum.removeListener?.('accountsChanged', onAccounts);
   ethereum = chosen;
   const [account] = await ethereum.request({ method: 'eth_requestAccounts' });
@@ -446,7 +472,11 @@ document.querySelector('nav a[href="#make"]').addEventListener('click', (ev) => 
   form.elements.token.focus({ preventScroll: true });
 });
 
-$('#connect').onclick =() => connect().catch((e) => { $('#formMsg').textContent = readable(e); $('#formMsg').className = 'msg bad'; });
+$('#connect').onclick = () => connect().catch((e) => {
+  if (e.silent) return;
+  $('#formMsg').textContent = readable(e);
+  $('#formMsg').className = 'msg bad';
+});
 
 // A promise has its own address. /p/2/ is a small page with that promise's link preview, built by
 // tools/build-previews.mjs; it sends people on to /#p2, which opens the board at that card.
