@@ -58,8 +58,9 @@
         <span class="row"><input name="duration" inputmode="numeric" value="30" required><select name="unit"><option value="60">minutes</option><option value="3600">hours</option><option value="86400">days</option></select></span>
       </label>
       <label>Bond, in IMD<input name="bond" inputmode="decimal" placeholder="5" required></label>
+      <div class="sum" id="formSum" aria-live="polite"></div>
       <button class="btn pink" id="submit" type="submit">Make the promise</button>
-      <p class="fine" id="formHint">Minimum bond 5 IMD on Robinhood Chain. 10 minutes to 30 days; the oracle has been checked on short terms.</p>
+      <p class="fine">Your wallet will ask twice: first to let the vault take the bond, then to make the promise. On Robinhood Chain, for 10 minutes to 30 days.</p>
       <p id="formMsg" class="msg"></p>
     </form>
   </div>

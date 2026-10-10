@@ -32,6 +32,9 @@ const erc20Abi = [
   { type: 'function', name: 'approve', stateMutability: 'nonpayable', inputs: [{ type: 'address' }, { type: 'uint256' }], outputs: [{ type: 'bool' }] },
 ];
 
+const intakeAbi = [
+  { type: 'function', name: 'priceOf', stateMutability: 'view', inputs: [{ type: 'bytes32' }, { type: 'address' }], outputs: [{ type: 'uint256' }] },
+];
 const stakingAbi = [
   { type: 'function', name: 'totalStaked', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint256' }] },
   { type: 'function', name: 'rewardRate', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint256' }] },
@@ -45,6 +48,8 @@ const stakingAbi = [
 
 const state = {
   account: null, promises: [], minBond: 5n * 10n ** 18n, preview: !config.vault,
+  // The oracle's price for one question, in IMD wei. Read from the Intake with the board.
+  fee: 5n * 10n ** 17n,
   // For running promises: what the maker's wallet holds of the token (by promise id), and market
   // prices in dollars (by token address). Together they say how much the bond is worth next to
   // what it is guarding.
@@ -102,10 +107,14 @@ async function readBoard() {
   // Running promises seen last time: ask what their makers hold now, in the same request.
   const watched = state.promises.filter((p) => STATUS[p.status] === 'Active');
   for (const p of watched) calls.push({ to: p.token, abi: erc20Abi, functionName: 'balanceOf', args: [p.maker] });
+  // What the oracle charges for one question right now. Last in the batch, so nothing above moves.
+  calls.push({ to: config.intake, abi: intakeAbi, functionName: 'priceOf', args: [config.oracleAction, config.imd] });
   const out = await nodeBatch(calls);
   const [count, minBond, totalStaked, rewardRate, periodFinish] = out;
   const rows = out.slice(5, 5 + PAGE);
   watched.forEach((p, i) => { const held = out[5 + PAGE + i]; if (held !== null) state.balances[p.id] = held; });
+  const fee = out[5 + PAGE + watched.length];
+  if (fee) state.fee = fee;
   if (count === null) throw new Error('the vault did not answer');
   if (minBond) state.minBond = minBond;
   if (totalStaked !== null) state.pool = { totalStaked, rewardRate: rewardRate ?? 0n, periodFinish: Number(periodFinish ?? 0n) };
@@ -321,6 +330,7 @@ function render() {
   stat('broken', state.promises.filter((p) => STATUS[p.status] === 'Broken').length);
   stat('locked', imd(state.promises.reduce((s, p) => s + p.bond, 0n)));
   renderPool();
+  renderSum();
   tick();
 }
 
@@ -629,6 +639,7 @@ $('#form').addEventListener('submit', async (ev) => {
     msg("It's on the board. Now keep it.");
     squeeze();
     ev.target.reset();
+    renderSum();
     setTimeout(refresh, NODE_GAP_MS);
   } catch (e) {
     msg(readable(e), true);
@@ -678,6 +689,23 @@ async function poolAction(kind) {
   }
 }
 for (const kind of ['stake', 'unstake', 'claim']) $(`#${kind}Btn`).onclick = () => poolAction(kind);
+
+/** Under the bond field: what is locked, what the question costs, what comes back. */
+function renderSum() {
+  const box = $('#formSum');
+  const text = $('#form').elements.bond.value.trim().replace(',', '.');
+  const least = state.minBond > state.fee * 3n ? state.minBond : state.fee * 3n;
+  let bond = null;
+  if (/^\d+(\.\d{0,18})?$/.test(text)) { try { bond = parseUnits(text, 18); } catch { /* leave it null */ } }
+  if (bond === null || bond === 0n) {
+    box.innerHTML = `The smallest bond is <b>${imd(least)} IMD</b>. Settling a promise costs <b>${imd(state.fee)} IMD</b> for the oracle's question, paid out of the bond.`;
+  } else if (bond < least) {
+    box.innerHTML = `That's under the smallest bond, <b>${imd(least)} IMD</b>.`;
+  } else {
+    box.innerHTML = `You lock <b>${imd(bond)} IMD</b>. The oracle's question takes <b>${imd(state.fee)} IMD</b> of it when the promise is settled.<br>Keep your word and <b>${imd(bond - state.fee)} IMD</b> comes home. Break it and none of it does.`;
+  }
+}
+$('#form').elements.bond.addEventListener('input', renderSum);
 
 // Where to get the token, and its address to check against whatever the swap page shows.
 $('.get').hidden = !config.token || !config.buy;
