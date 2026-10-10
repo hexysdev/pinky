@@ -72,6 +72,7 @@ h1, h2, .brand, .stats dd, .card p.say { font-family: var(--display); font-varia
 .form input:focus, .form select:focus { outline: none; border-color: var(--pink); }
 .form .row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 8px; }
 .sum { padding: 10px 14px; border-radius: 12px; background: #EDE3CD; font-size: 14px; line-height: 1.5; }
+.sum:empty { display: none; }
 .sum b { font-weight: 700; }
 .sum p { margin: 0; }
 .sum p + p { margin-top: 6px; }
