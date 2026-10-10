@@ -163,7 +163,12 @@ async function readPrices() {
   const wanted = [...new Set(state.promises.filter((p) => STATUS[p.status] === 'Active').map((p) => p.token.toLowerCase()))];
   if (!wanted.length || Date.now() - state.pricesAt < 300_000) return false;
   state.pricesAt = Date.now();
-  const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${[...wanted, config.imd.toLowerCase()].slice(0, 30).join(',')}`);
+  return fetchPrices(wanted);
+}
+
+/** Adds dollar prices for these tokens and IMD to what is known. True when the answer arrived. */
+async function fetchPrices(tokens) {
+  const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${[...tokens, config.imd.toLowerCase()].slice(0, 30).join(',')}`);
   if (!res.ok) return false;
   const best = {};
   for (const pair of (await res.json()).pairs ?? []) {
@@ -173,7 +178,7 @@ async function readPrices() {
     if (pair.chainId !== 'robinhood' || !token || !(price > 0)) continue;
     if (!best[token] || depth > best[token].depth) best[token] = { price, depth };
   }
-  state.prices = Object.fromEntries(Object.entries(best).map(([t, v]) => [t, v.price]));
+  state.prices = { ...state.prices, ...Object.fromEntries(Object.entries(best).map(([t, v]) => [t, v.price])) };
   return true;
 }
 
@@ -475,6 +480,9 @@ function onAccounts(accounts) {
   state.account = accounts[0] ? getAddress(accounts[0]) : null;
   state.mine = null;
   $('#connect').textContent = state.account ? short(state.account) : 'Connect wallet';
+  // The form's preview is about this wallet's holdings: look again.
+  lookUpToken(true);
+  renderSum();
   renderPool();
   readMine().catch(() => {});
 }
@@ -639,6 +647,7 @@ $('#form').addEventListener('submit', async (ev) => {
     msg("It's on the board. Now keep it.");
     squeeze();
     ev.target.reset();
+    lookUpToken(true);
     renderSum();
     setTimeout(refresh, NODE_GAP_MS);
   } catch (e) {
@@ -690,22 +699,108 @@ async function poolAction(kind) {
 }
 for (const kind of ['stake', 'unstake', 'claim']) $(`#${kind}Btn`).onclick = () => poolAction(kind);
 
-/** Under the bond field: what is locked, what the question costs, what comes back. */
+// What the form knows about the token being typed: its name and decimals, and, with a wallet
+// connected, how much of it that wallet holds.
+const draft = { token: '', meta: null, held: null, bad: false };
+let draftTimer = null;
+
+const parseAmount = (text, decimals) => {
+  const clean = text.trim().replace(',', '.');
+  if (!/^\d+(\.\d+)?$/.test(clean)) return null;
+  try { return parseUnits(clean, decimals); } catch { return null; }
+};
+
+/** Looks the typed token up, a moment after the typing stops. */
+function lookUpToken(force = false) {
+  const token = $('#form').elements.token.value.trim().toLowerCase();
+  clearTimeout(draftTimer);
+  if (!force && token === draft.token && (draft.meta || draft.bad)) return;
+  Object.assign(draft, { token, meta: state.tokens[token] ?? null, held: null, bad: false });
+  if (!isAddress(token) || state.preview) return;
+  draftTimer = setTimeout(async () => {
+    try {
+      if (!draft.meta) {
+        // Through the wallet when there is one; the public node only as a fallback, once per token.
+        const calls = [{ to: token, abi: erc20Abi, functionName: 'symbol' }, { to: token, abi: erc20Abi, functionName: 'decimals' }];
+        const [symbol, decimals] = state.account
+          ? await Promise.all(calls.map((c) => walletCall(c.to, c.abi, c.functionName).catch(() => null)))
+          : await nodeBatch(calls);
+        if (draft.token !== token) return;
+        if (decimals === null) { draft.bad = true; return renderSum(); }
+        draft.meta = state.tokens[token] = { symbol: symbol ?? '', decimals: Number(decimals) };
+        localStorage.setItem('pinky.tokens', JSON.stringify(state.tokens));
+      }
+      if (state.account) draft.held = await walletCall(token, erc20Abi, 'balanceOf', [state.account]).catch(() => null);
+      if (draft.token !== token) return;
+      renderSum();
+      if (!state.prices[token] && await fetchPrices([token]).catch(() => false) && draft.token === token) renderSum();
+    } catch { /* the preview just stays shorter */ }
+  }, 600);
+}
+
+/**
+ * Under the bond field: the promise in words, what is locked and what comes back, and how the
+ * bond compares with what the wallet holds — the same sentence the board will show.
+ */
 function renderSum() {
   const box = $('#formSum');
-  const text = $('#form').elements.bond.value.trim().replace(',', '.');
+  const f = $('#form').elements;
   const least = state.minBond > state.fee * 3n ? state.minBond : state.fee * 3n;
-  let bond = null;
-  if (/^\d+(\.\d{0,18})?$/.test(text)) { try { bond = parseUnits(text, 18); } catch { /* leave it null */ } }
-  if (bond === null || bond === 0n) {
-    box.innerHTML = `The smallest bond is <b>${imd(least)} IMD</b>. Settling a promise costs <b>${imd(state.fee)} IMD</b> for the oracle's question, paid out of the bond.`;
-  } else if (bond < least) {
-    box.innerHTML = `That's under the smallest bond, <b>${imd(least)} IMD</b>.`;
-  } else {
-    box.innerHTML = `You lock <b>${imd(bond)} IMD</b>. The oracle's question takes <b>${imd(state.fee)} IMD</b> of it when the promise is settled.<br>Keep your word and <b>${imd(bond - state.fee)} IMD</b> comes home. Break it and none of it does.`;
+  const bond = parseAmount(f.bond.value, 18);
+  const lines = [];
+
+  if (draft.bad) {
+    lines.push("That address isn't an ordinary token. NFTs aren't supported yet.");
+  } else if (draft.meta) {
+    const symbol = esc(draft.meta.symbol || 'tokens');
+    const maxOut = parseAmount(f.maxOut.value || '0', draft.meta.decimals);
+    const n = Number(f.duration.value);
+    const unit = { 60: 'minute', 3600: 'hour', 86400: 'day' }[f.unit.value];
+    const term = n > 0 && unit ? ` for ${n.toLocaleString('en-US')} ${unit}${n === 1 ? '' : 's'}` : '';
+    if (maxOut !== null) {
+      const limit = maxOut === 0n ? `a single ${symbol}` : `more than ${Number(formatUnits(maxOut, draft.meta.decimals)).toLocaleString('en-US', { maximumFractionDigits: 2 })} ${symbol}`;
+      lines.push(`<span class="sum-say">“I won't move ${limit}${term}.”</span>`);
+    }
   }
+
+  if (bond === null || bond === 0n) {
+    lines.push(`The smallest bond is <b>${imd(least)} IMD</b>. Settling a promise costs <b>${imd(state.fee)} IMD</b> for the oracle's question, paid out of the bond.`);
+  } else if (bond < least) {
+    lines.push(`That's under the smallest bond, <b>${imd(least)} IMD</b>.`);
+  } else {
+    lines.push(`You lock <b>${imd(bond)} IMD</b>; the oracle's question takes <b>${imd(state.fee)}</b> of it. Keep your word and <b>${imd(bond - state.fee)} IMD</b> comes home. Break it and none does.`);
+  }
+
+  if (draft.meta && !draft.bad) {
+    const maxOut = parseAmount(f.maxOut.value || '0', draft.meta.decimals) ?? 0n;
+    if (!state.account) {
+      lines.push('Connect a wallet to see how the bond compares with what you hold.');
+    } else if (draft.held !== null) {
+      const atStake = draft.held > maxOut ? draft.held - maxOut : 0n;
+      const tokenUsd = state.prices[draft.token];
+      const imdUsd = state.prices[config.imd.toLowerCase()];
+      const shown = `${Number(formatUnits(atStake, draft.meta.decimals)).toLocaleString('en-US', { maximumFractionDigits: 2 })} ${esc(draft.meta.symbol || 'tokens')}`;
+      if (atStake === 0n) {
+        lines.push(draft.held === 0n
+          ? `<b>Your wallet holds none of this token</b>, so the promise would have nothing to break.`
+          : `<b>Your wallet holds no more than the limit</b>, so the promise would have nothing to break.`);
+      } else if (bond && bond >= least && tokenUsd && imdUsd) {
+        const stakeUsd = Number(formatUnits(atStake, draft.meta.decimals)) * tokenUsd;
+        const share = (Number(formatUnits(bond, 18)) * imdUsd) / stakeUsd;
+        const dollars = stakeUsd.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: stakeUsd < 100 ? 2 : 0 });
+        lines.push(share >= 1
+          ? `The bond is worth <b>more than</b> the ${shown} you could move, about ${dollars}.`
+          : `The bond is worth <b>${share < 0.01 ? 'less than 1%' : `${Math.round(share * 100)}%`}</b> of the ${shown} you could move, about ${dollars}. The board will say so.`);
+      } else if (!tokenUsd) {
+        lines.push(`You could move ${shown}. There's no market price for it, so the board can't weigh the bond against that.`);
+      }
+    }
+  }
+  box.innerHTML = lines.map((l) => `<p>${l}</p>`).join('');
 }
-$('#form').elements.bond.addEventListener('input', renderSum);
+
+for (const name of ['bond', 'maxOut', 'duration', 'unit']) $('#form').elements[name].addEventListener('input', renderSum);
+$('#form').elements.token.addEventListener('input', () => { lookUpToken(); renderSum(); });
 
 // Where to get the token, and its address to check against whatever the swap page shows.
 $('.get').hidden = !config.token || !config.buy;
