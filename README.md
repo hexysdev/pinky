@@ -19,6 +19,11 @@ Live on Robinhood Chain since 2026-10-09 — [pinkybond.fun](https://pinkybond.f
 | Owner | `0x89d6584e733ece619c9c34f9a370e1dff5ecf8ef` |
 | IMD launch | #1166, [source as deployed](https://github.com/identity-md-launches/launch-1166-pinkystaking-pinkyvault) |
 
+All three contracts are verified on Sourcify, creation and runtime bytecode both an exact match:
+[vault](https://repo.sourcify.dev/4663/0x3c81384aa1ca064316576a214e2fb30969992772),
+[staking](https://repo.sourcify.dev/4663/0x17fb2067652bcf4803e937cf323a248ff6b7cba3),
+[token](https://repo.sourcify.dev/4663/0xb125c461c00863aacad4cc99311d2f23d4342a6f).
+
 The sources here are the ones deployed. They came out of the IdentityMD swarm's audit of this
 repository: an imported-code audit, four specialist audits and a judge, whose findings are fixed
 and listed in `ADAPTATION.md`. 137 Foundry tests pass (unit, fuzz, invariant and the protocol's
