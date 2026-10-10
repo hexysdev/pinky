@@ -682,6 +682,8 @@ for (const kind of ['stake', 'unstake', 'claim']) $(`#${kind}Btn`).onclick = () 
 // Where to get the token, and its address to check against whatever the swap page shows.
 $('.get').hidden = !config.token || !config.buy;
 $('#buy').href = config.buy;
+$('#buyTop').href = config.buy;
+$('#buyTop').hidden = $('.get').hidden;
 $('#verified').href = config.verified;
 $('#copyToken').onclick = async () => {
   const btn = $('#copyToken');
