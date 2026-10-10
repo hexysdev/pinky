@@ -9,6 +9,6 @@ export const config = {
   staking: '0x17fb2067652bcf4803e937cf323a248ff6b7cba3',
   token: '0xb125c461c00863aacad4cc99311d2f23d4342a6f',
   github: 'https://github.com/hexysdev/pinky',
-  // Empty until the project has an account in good standing; the footer shows the link only when set.
-  x: '',
+  // The footer shows this link only when it is set.
+  x: 'https://x.com/pinkybond_fun',
 };
