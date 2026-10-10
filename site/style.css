@@ -158,7 +158,9 @@ h3 { font: 700 18px/1.3 var(--sans); margin: 0 0 4px; }
 .wallet-list { display: grid; gap: 8px; margin-bottom: 14px; }
 .wallet { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 14px; border: 2px solid var(--line); border-radius: 14px; background: #fff; color: var(--wine); font: 700 16px var(--sans); cursor: pointer; text-align: left; }
 .wallet:hover, .wallet:focus-visible { border-color: var(--pink); outline: none; }
-.wallet img { width: 28px; height: 28px; border-radius: 6px; }
+.wallet img, .wallet-initial { flex: none; width: 28px; height: 28px; border-radius: 8px; }
+.wallet img { object-fit: contain; }
+.wallet-initial { display: grid; place-items: center; background: var(--pink); font: 600 16px var(--display); }
 
 .foot { margin-top: 56px; padding: 28px 0 40px; background: var(--wine); color: var(--ivory); font-size: 14px; }
 .foot dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 16px; margin: 0 0 16px; }

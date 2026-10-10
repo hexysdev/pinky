@@ -353,14 +353,23 @@ function chooseWallet() {
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'wallet';
-      // Icons are data URIs the wallet supplies; anything else is not loaded.
-      if (/^data:image\//.test(info.icon ?? '')) {
+      const name = String(info.name ?? 'Wallet');
+      // A wallet without a usable icon gets its initial, so the list lines up either way.
+      const initial = document.createElement('span');
+      initial.className = 'wallet-initial';
+      initial.textContent = name.trim().charAt(0).toUpperCase();
+      // The standard asks for a data URI; some wallets hand over an https address instead.
+      const icon = String(info.icon ?? '').trim();
+      if (/^(data:image\/|https:\/\/)/i.test(icon)) {
         const img = document.createElement('img');
-        img.src = info.icon;
         img.alt = '';
+        img.onerror = () => img.replaceWith(initial);
+        img.src = icon;
         btn.append(img);
+      } else {
+        btn.append(initial);
       }
-      btn.append(document.createTextNode(info.name ?? 'Wallet'));
+      btn.append(document.createTextNode(name));
       btn.onclick = () => { dialog.close('picked'); resolve(provider); };
       return btn;
     }));
