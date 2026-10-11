@@ -113,11 +113,10 @@ v5.5.0, forge-std v1.9.7); nothing is downloaded at build time.
   answer is bound to a promise by the Intake request id, the chain id and the exact block range.
   Two promises closed in the same blocks rely on the Intake's writer delivering each answer under
   its own request id.
-- **Window length.** The oracle has attested log sums on Robinhood Chain over ranges of about
-  18,000 blocks (roughly half an hour). A 30-day term is tens of millions of blocks and is
-  untested; if the oracle cannot answer it, the bond is refunded after three attempts. Before
-  launch, one live request over a window of several days' blocks should be run, and if the oracle
-  has a limit, `MAX_DURATION` capped to it.
+- **Window length.** The longest window settled so far is promise #2 on 2026-10-11: 921,335
+  blocks, a little over a day, attested in 92 seconds (oracle request
+  `48323d51-a3d8-47fd-a309-b17f8358067e`). A 30-day term is tens of millions of blocks and is
+  untested; if the oracle cannot answer it, the bond is refunded after three attempts.
 - **Standard tokens only.** Rebasing or fee-on-transfer tokens are out of scope.
 - **Not for NFTs.** The question sums the `value` of `Transfer` events. ERC-721 puts a token id
   there instead of an amount and ERC-1155 uses other events, so a promise about an NFT would be
