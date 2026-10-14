@@ -16,6 +16,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const RPC = 'https://rpc.mainnet.chain.robinhood.com';
 const VAULT = '0x3c81384aa1ca064316576a214e2fb30969992772';
+const IMD = '0x5f7bb59365ce557c26dbcaa4ee9d39a4b95b7127';
 const SITE = 'https://pinkybond.fun';
 const OUT = fileURLToPath(new URL('../site/p/', import.meta.url));
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
@@ -87,13 +88,50 @@ async function read() {
   }).filter(Boolean);
 
   const tokens = [...new Set(promises.map((p) => p.token))];
-  const meta = await rpc(tokens.flatMap((to) => [{ to, data: '0x95d89b41' }, { to, data: '0x313ce567' }]));
+  // For a running promise, also what the wallet holds now: the card weighs the bond against it.
+  const running = promises.filter((p) => p.status === 'Active');
+  const meta = await rpc([
+    ...tokens.flatMap((to) => [{ to, data: '0x95d89b41' }, { to, data: '0x313ce567' }]),
+    ...running.map((p) => ({ to: p.token, data: `0x70a08231${p.maker.slice(2).padStart(64, '0')}` })),
+  ]);
+  running.forEach((p, i) => { const h = meta[2 * tokens.length + i]; if (h) p.held = BigInt(h); });
   const info = new Map(tokens.map((t, i) => [t, {
     symbol: meta[2 * i] ? abiString(meta[2 * i]) : '',
     decimals: meta[2 * i + 1] ? Math.min(36, Number(BigInt(meta[2 * i + 1]))) : 18,
   }]));
   for (const p of promises) Object.assign(p, info.get(p.token));
+  if (running.length) await weigh(running);
   return promises;
+}
+
+/** Dollar prices from DexScreener (not the node), then the bond as a share of what is at stake. */
+async function weigh(running) {
+  let prices = {};
+  try {
+    const wanted = [...new Set([...running.map((p) => p.token), IMD])].slice(0, 30).join(',');
+    const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${wanted}`, { headers: { 'User-Agent': UA } });
+    const best = {};
+    for (const pair of (await res.json()).pairs ?? []) {
+      const token = pair.baseToken?.address?.toLowerCase();
+      const price = Number(pair.priceUsd);
+      const depth = Number(pair.liquidity?.usd ?? 0);
+      if (pair.chainId !== 'robinhood' || !token || !(price > 0)) continue;
+      if (!best[token] || depth > best[token].depth) best[token] = { price, depth };
+    }
+    prices = Object.fromEntries(Object.entries(best).map(([t, v]) => [t, v.price]));
+  } catch (e) {
+    console.log(`  no prices (${e.message}); cards go without the bond's share`);
+  }
+  for (const p of running) {
+    if (p.held === undefined) continue;
+    const atStake = p.held > p.maxOut ? p.held - p.maxOut : 0n;
+    if (atStake === 0n) { p.cover = 'Right now the wallet holds no more than the limit.'; continue; }
+    const tokenUsd = prices[p.token], imdUsd = prices[IMD];
+    if (!tokenUsd || !imdUsd) continue;
+    const share = (Number(p.bond) / 1e18 * imdUsd) / (Number(atStake) / 10 ** p.decimals * tokenUsd);
+    p.cover = share >= 1 ? 'The bond is worth more than what the wallet could move.'
+      : `The bond is worth ${share < 0.01 ? 'less than 1%' : `${Math.round(share * 100)}%`} of what the wallet could move.`;
+  }
 }
 
 /** The words on the card and in the tags. Same voice as the board. */
@@ -118,7 +156,7 @@ function describe(p, now) {
     default:
       return over
         ? { badge: 'Time is up', tone: 'waiting', line: `${who} promised not to move ${limit}.`, note: `${bond} on the line. Waiting to be closed.` }
-        : { badge: 'Running', tone: 'waiting', line: `${who} won't move ${limit}.`, note: `${bond} on the line until ${until}.` };
+        : { badge: 'Running', tone: 'waiting', line: `${who} won't move ${limit}.`, note: `${bond} on the line until ${until}.${p.cover ? ` ${p.cover}` : ''}` };
   }
 }
 

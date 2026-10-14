@@ -115,6 +115,22 @@ h3 { font: 700 18px/1.3 var(--sans); margin: 0 0 4px; }
 /* The promise a link pointed at. */
 .card.linked { border-color: var(--pink-deep); box-shadow: 0 0 0 3px var(--pink); }
 .card { scroll-margin-top: 90px; }
+.shares { display: flex; gap: 14px; margin-left: auto; }
+.shares .share { margin-left: 0; }
+.wallet-view { margin: -8px 0 16px; padding: 10px 14px; border-radius: 12px; background: #EDE3CD; font-size: 15px; }
+.wallet-view[hidden] { display: none; }
+.wallet-view a { text-decoration-color: var(--pink); }
+.sub a { text-decoration-color: var(--pink); }
+.sub a[hidden], .fine[hidden] { display: none; }
+
+.faq { display: grid; gap: 8px; }
+.faq details { background: var(--paper); border: 1px solid var(--line); border-radius: 16px; padding: 12px 20px; }
+.faq summary { cursor: pointer; font: 600 19px/1.35 var(--display); font-variation-settings: 'SOFT' 100, 'WONK' 0; list-style: none; }
+.faq summary::-webkit-details-marker { display: none; }
+.faq summary::after { content: '+'; float: right; color: var(--pink-deep); font-weight: 700; }
+.faq details[open] summary::after { content: '2'; }
+.faq p { margin: 8px 0 2px; font-size: 16px; }
+.mono { font-family: var(--mono); font-size: .9em; }
 .hooks .h1 { stroke: var(--wine); }
 .hooks .h2 { stroke: var(--pink-deep); }
 .hooks path { transition: transform .6s cubic-bezier(.3, 1.4, .5, 1); }

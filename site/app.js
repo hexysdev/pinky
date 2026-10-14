@@ -270,7 +270,8 @@ function describe(p) {
   const limit = p.maxOut === 0n ? 'a single token' : `more than ${amount(p, p.maxOut)}`;
   const tokenName = state.tokens[p.token.toLowerCase()]?.symbol;
   const of = p.maxOut === 0n && tokenName ? ` of ${esc(tokenName)}` : '';
-  const say = `<span class="who">${link('address', p.maker, short(p.maker))}</span> ${over ? 'promised not to move' : "won't move"} ${limit}${of}.`;
+  const who = state.preview ? esc(short(p.maker)) : `<a href="#w${p.maker.toLowerCase()}" title="Every promise this wallet made">${esc(short(p.maker))}</a>`;
+  const say = `<span class="who">${who}</span> ${over ? 'promised not to move' : "won't move"} ${limit}${of}.`;
   switch (STATUS[p.status]) {
     case 'Active':
       return over
@@ -289,13 +290,48 @@ function describe(p) {
   }
 }
 
+/** A post about one promise, in words anyone can read without the board. */
+function shareOnX(p, d) {
+  const box = document.createElement('div');
+  box.innerHTML = d.say;
+  const status = STATUS[p.status];
+  const end = { Kept: ' Kept.', Broken: ' Broken.' }[status] ?? ` ${imd(p.bond)} IMD on it.`;
+  const text = `${box.textContent}${end} Pinky promise.`;
+  return `https://x.com/intent/post?text=${encodeURIComponent(text)}&url=${encodeURIComponent(promiseUrl(p.id))}`;
+}
+
+/** #w0x… shows one wallet's promises: its record, kept and broken, in one line. */
+function walletId() {
+  const m = /^#w(0x[0-9a-fA-F]{40})$/.exec(location.hash);
+  return m ? m[1].toLowerCase() : null;
+}
+function renderWallet(wallet, shown) {
+  const box = $('#walletView');
+  const mine = $('#minePromises');
+  mine.hidden = !state.account || wallet === state.account.toLowerCase();
+  if (state.account) mine.href = `#w${state.account.toLowerCase()}`;
+  box.hidden = !wallet;
+  if (!wallet) return;
+  const n = (s) => shown.filter((p) => STATUS[p.status] === s).length;
+  const kept = n('Kept'), broken = n('Broken');
+  const bonded = shown.reduce((s, p) => s + p.bond, 0n);
+  const whose = state.account && wallet === state.account.toLowerCase() ? 'Your wallet' : `Wallet ${short(wallet)}`;
+  const record = shown.length
+    ? `${shown.length} ${shown.length === 1 ? 'promise' : 'promises'}, ${kept} kept, ${broken} broken.${bonded ? ` ${imd(bonded)} IMD still in bonds.` : ''}`
+    : 'No promises yet.';
+  box.innerHTML = `<b>${esc(whose)}</b>: ${record} <a href="${config.explorer}/address/${wallet}" target="_blank" rel="noopener">On the explorer</a> · <a href="#board">Show everyone</a>`;
+}
+
 function render() {
   const cards = $('#cards');
+  const wallet = walletId();
+  const shown = wallet ? state.promises.filter((p) => p.maker.toLowerCase() === wallet) : state.promises;
+  renderWallet(wallet, shown);
   let html;
-  if (!state.promises.length) {
-    html = '<p class="empty">No promises yet. Be the first to mean it.</p>';
+  if (!shown.length) {
+    html = wallet ? "<p class='empty'>This wallet hasn't made a promise yet.</p>" : '<p class="empty">No promises yet. Be the first to mean it.</p>';
   } else {
-    html = state.promises.map((p) => {
+    html = shown.map((p) => {
       const d = describe(p);
       const token = state.tokens[p.token.toLowerCase()];
       const status = STATUS[p.status];
@@ -310,7 +346,7 @@ function render() {
       const start = state.starts[p.id];
       const bar = d.running && start ? `<div class="term"><i data-term="${start},${Number(p.endTime)}"></i></div>` : '';
       return `<article class="card ${fresh}${linkedId() === p.id ? ' linked' : ''}" id="p${p.id}">
-        <div class="card-head"><span class="badge ${d.badge[0]}">${d.badge[1]}</span><span class="id">#${p.id}</span><button class="share" type="button" data-share="${p.id}">Copy link</button>${hooks(status === 'Broken' ? 'apart' : status === 'Refunded' ? 'idle' : '')}</div>
+        <div class="card-head"><span class="badge ${d.badge[0]}">${d.badge[1]}</span><span class="id">#${p.id}</span><span class="shares"><button class="share" type="button" data-share="${p.id}">Copy link</button><a class="share" href="${shareOnX(p, d)}" target="_blank" rel="noopener">Share on X</a><button class="share" type="button" data-card="${p.id}" data-badge="${d.badge[1]}">Get card</button></span>${hooks(status === 'Broken' ? 'apart' : status === 'Refunded' ? 'idle' : '')}</div>
         <p class="say">${d.say}</p>
         ${bar}
         <div class="meta">
@@ -578,7 +614,12 @@ function showLinked() {
   // Jump, don't glide: the visitor came for this card, and a background tab never finishes a glide.
   card.scrollIntoView({ block: 'center', behavior: 'instant' });
 }
-window.addEventListener('hashchange', () => { shownLinked = null; render(); showLinked(); });
+window.addEventListener('hashchange', () => {
+  shownLinked = null;
+  render();
+  showLinked();
+  if (walletId()) $('#board').scrollIntoView({ block: 'start', behavior: 'instant' });
+});
 
 $('#cards').addEventListener('click', async (ev) => {
   const share = ev.target.closest('button[data-share]');
@@ -593,6 +634,21 @@ $('#cards').addEventListener('click', async (ev) => {
       share.textContent = 'Link is in the address bar';
     }
     setTimeout(() => { share.textContent = 'Copy link'; }, 2000);
+    return;
+  }
+  const get = ev.target.closest('button[data-card]');
+  if (get) {
+    // The card is drawn by tools/build-previews.mjs every twenty minutes, so a new one may not exist yet.
+    const name = `card-${get.dataset.badge.toLowerCase().replace(/[^a-z]+/g, '-')}.png`;
+    const url = `/p/${get.dataset.card}/${name}`;
+    const ok = await fetch(url, { method: 'HEAD' }).then((r) => r.ok).catch(() => false);
+    if (ok) {
+      const a = Object.assign(document.createElement('a'), { href: url, download: `pinky-promise-${get.dataset.card}.png` });
+      a.click();
+    } else {
+      get.textContent = 'Card is still being drawn, try in 20 minutes';
+      setTimeout(() => { get.textContent = 'Get card'; }, 3000);
+    }
     return;
   }
   const btn = ev.target.closest('button[data-act]');
@@ -808,6 +864,8 @@ $('#buy').href = config.buy;
 $('#buyTop').href = config.buy;
 $('#buyTop').hidden = $('.get').hidden;
 $('#verified').href = config.verified;
+$('#getImd').href = config.buyImd;
+$('#needImd').hidden = !config.buyImd;
 $('#copyToken').onclick = async () => {
   const btn = $('#copyToken');
   try {

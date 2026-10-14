@@ -30,6 +30,7 @@
     <a href="#board">Promises</a>
     <a href="#stake">Stake</a>
     <a href="#how">How it works</a>
+    <a href="#faq">FAQ</a>
     <a id="buyTop" class="nav-get" target="_blank" rel="noopener">Get PINKY</a>
   </nav>
   <button id="connect" class="btn ghost">Connect wallet</button>
@@ -61,6 +62,7 @@
       <div class="sum" id="formSum" aria-live="polite"></div>
       <button class="btn pink" id="submit" type="submit">Make the promise</button>
       <p class="fine">Your wallet will ask twice: first to let the vault take the bond, then to make the promise. On Robinhood Chain, for 10 minutes to 30 days.</p>
+      <p class="fine" id="needImd">No IMD yet? <a id="getImd" target="_blank" rel="noopener">Get it on Uniswap</a>.</p>
       <p id="formMsg" class="msg"></p>
     </form>
   </div>
@@ -71,7 +73,8 @@
 
   <section id="board">
     <h2>Promises</h2>
-    <p class="sub">Newest first. Anyone can close a promise once its time is up, ask the oracle, and pay it out.</p>
+    <p class="sub">Newest first. Anyone can close a promise once its time is up, ask the oracle, and pay it out. <a id="minePromises" href="#" hidden>Show only mine</a></p>
+    <p id="walletView" class="wallet-view" hidden></p>
     <div id="cards" class="cards"><p class="empty">Reading the chain…</p></div>
   </section>
 
@@ -122,7 +125,22 @@
       <li><h3>The number decides</h3><p>Within the limit: the bond goes home. Over it: a tenth goes to the first watcher who asked, and the rest is split between PINKY stakers and a burn.</p></li>
     </ol>
     <p class="fine">A promise covers one wallet and one ordinary token (ERC-20; NFTs aren't supported yet), and nobody can pause or edit it once it's made. If the oracle can't answer after three tries, the bond is returned.</p>
-    <p class="fine">Before launch the IdentityMD swarm audited the contracts: one audit of the code as written, four specialist audits and a judge. What they found was fixed, and <a href="https://github.com/hexysdev/pinky/blob/main/ADAPTATION.md" target="_blank" rel="noopener">the list is public</a>. That is a review by AI agents, not an audit by an outside firm, so read the contracts before you trust them.</p>
+    <p class="fine">Before launch the IdentityMD swarm audited the contracts: one audit of the code as written, four specialist audits and a judge. What they found was fixed, and <a href="https://github.com/hexysdev/pinky/blob/main/ADAPTATION.md" target="_blank" rel="noopener">the list is public</a>, as are <a href="https://api.imd.fun/jobs/13613dc2-172f-4b34-b1a6-17de4f20f4df" target="_blank" rel="noopener">the swarm's own record of the job</a> and <a href="https://github.com/identity-md-launches/launch-1166-pinkystaking-pinkyvault" target="_blank" rel="noopener">the code exactly as it was deployed</a>. That is a review by AI agents, not an audit by an outside firm, so read the contracts before you trust them.</p>
+  </section>
+
+  <section id="faq">
+    <h2>Questions people ask</h2>
+    <div class="faq">
+      <details><summary>Is this a locker?</summary><p>No. A locker takes your tokens away. Pinky never touches them: they stay in your wallet and you can sell any minute. What you lock is IMD, and selling costs you that.</p></details>
+      <details><summary>What counts as moving?</summary><p>Every transfer of that token out of the wallet: a sale, a send to your other wallet, a deposit into staking or a pool. Tokens coming in don't count.</p></details>
+      <details><summary>What if I sell from another wallet?</summary><p>Then the promise doesn't see it. A promise covers one wallet, the one that made it. That's why the board says whose wallet it is and how much it holds.</p></details>
+      <details><summary>Who decides whether I kept it?</summary><p>The IdentityMD oracle. A panel of agents sums every transfer out of the wallet over the exact blocks the promise covered, and the contract only accepts a number the oracle has signed. Nobody here can overrule it.</p></details>
+      <details><summary>What does it cost?</summary><p>One oracle question, 0.5 IMD, taken from the bond when someone asks. Keep your word and the rest comes home. Plus gas on Robinhood Chain for your two signatures.</p></details>
+      <details><summary>Can I cancel or change a promise?</summary><p>No. Not you, not us. Once it's made, it runs until the deadline, and it keeps counting until someone closes it, so close it yourself when the time is up.</p></details>
+      <details><summary>What if the oracle doesn't answer?</summary><p>Anyone can ask again after a day, three times in all. After three failed tries, or a week after closing, the rest of the bond goes back to you.</p></details>
+      <details><summary>Who can change the contracts?</summary><p>Nobody can change the code. The vault's owner can point it at another oracle signer or Intake, which is a real trust point: the owner is <span class="mono">0x89d6…f8ef</span>, the team's wallet. Staking has no owner at all.</p></details>
+      <details><summary>Does it work for NFTs?</summary><p>Not yet. A promise counts amounts, and an NFT transfer carries a token id instead. The form refuses an NFT address so nobody gets a promise that can't be judged.</p></details>
+    </div>
   </section>
 </main>
 
