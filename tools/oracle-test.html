@@ -132,12 +132,15 @@ $('ask').onclick = async () => {
   } catch (e) { log(e.message, 'bad'); await refresh(); }
 };
 
-fetch('oracle-test.calldata.json').then((r) => r.json()).then((c) => {
+// ?c=oracle-test2.calldata.json picks another prepared question; the first test is the default.
+const file = new URLSearchParams(location.search).get('c') || 'oracle-test.calldata.json';
+if (!/^[\w.-]+\.calldata\.json$/.test(file)) throw new Error('Not a calldata file: ' + file);
+fetch(file).then((r) => r.json()).then((c) => {
   cfg = c;
   $('expFrom').textContent = c.from;
   $('imd').textContent = c.imd;
   $('intake').textContent = c.intake;
-  $('exp').textContent = c.expectedSumWei + ' wei (6.2152 IMD)';
+  $('exp').textContent = c.expectedLabel || c.expectedSumWei + ' wei (6.2152 IMD)';
   $('body').textContent = c.body;
 }).catch((e) => log('Could not load the calldata: ' + e.message, 'bad'));
 </script>
