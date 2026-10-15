@@ -62,6 +62,22 @@ request a bond paid for stays answerable until a verdict lands, so a late answer
 request still counts, and the first watcher to ask keeps the bounty. After three failed attempts,
 or seven days after closing, `refund(id)` returns what is left to the maker.
 
+## The second vault (PinkyVaultV2, not deployed yet)
+
+`src/PinkyVaultV2.sol` is launched beside the first vault, reusing PINKY and PinkyStaking; its
+manifest is `launch.json` (the first launch's is kept in `launches/1166-launch.json`). It adds:
+
+| | |
+|---|---|
+| Four kinds | **Keep**: no more than N of a token out (the first vault's promise). **Pay**: at least N of a token sent to a named address (log-sum filtered on `from` and `to`, tested live on 2026-10-14). **Hold**: at least N held at the closing block (`call-compare` on `balanceOf`, so NFTs and staked balances too; checked once, at the end). **Moves**: no more than N transfers out (`log-count`, for NFTs) |
+| A beneficiary | A promise can be made to someone. Broken, the bond goes to them, less 1% |
+| A fee | 1% of every bond that goes home or to a beneficiary, sent to PinkyStaking. None on the public split or a refund |
+| One call to settle | `settle(id)` closes the window 32 blocks behind the head and asks at once, two minutes after the deadline |
+| Intake v2 | Asks with `requestWithFailure`: a refusal or a panel that did not agree is reported at once. The report is unsigned, moves no funds and only lets anyone ask again without the day's wait |
+| Slow settings | The owner can only propose a new Intake, signer, panel or fee sink; anyone applies it seven days later |
+
+Tests: `test/PinkyVaultV2.t.sol`.
+
 ## Where IMD is used
 
 | | |

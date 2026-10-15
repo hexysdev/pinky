@@ -1,26 +1,13 @@
 {
-  "kind": "evm_project",
-  "token": {
-    "contract": "LaunchToken",
-    "name": "Pinky",
-    "symbol": "PINKY",
-    "decimals": 18
-  },
+  "kind": "evm_contracts",
   "contracts": [
     {
-      "contract": "PinkyStaking",
-      "constructorArgs": [
-        "$token",
-        "0x5f7bb59365ce557c26dbcaa4ee9d39a4b95b7127"
-      ]
-    },
-    {
-      "contract": "PinkyVault",
+      "contract": "PinkyVaultV2",
       "constructorArgs": [
         "$owner",
         "0x5f7bb59365ce557c26dbcaa4ee9d39a4b95b7127",
-        "$contract:PinkyStaking",
-        "0x1397434cd35e8a9c8ac312a61d3a285eb31dea56",
+        "0x17fb2067652bcf4803e937cf323a248ff6b7cba3",
+        "0xa43e6f75ee006411f79ac1c84120606c2330de82",
         "0x6f7261636c652e72657175657374406f7261636c652d31000000000000000000",
         "0x5598aa9146215bc13eb26f2c692ad1461fd32982",
         "5000000000000000000",
@@ -30,11 +17,5 @@
       ]
     }
   ],
-  "pool": {
-    "pairedCurrency": "0x5f7bb59365ce557c26dbcaa4ee9d39a4b95b7127",
-    "fee": 12500,
-    "tickSpacing": 60,
-    "initialPrice": "79228162514264337593543950336"
-  },
-  "notes": "Pinky on Robinhood Chain (chain id 4663), paired with IMD at 0x5f7bb59365ce557c26dbcaa4ee9d39a4b95b7127. LaunchToken (Pinky, PINKY, 18 decimals) has no constructor arguments and mints the whole fixed supply to the factory, which splits it; no contract here is sent any of it at launch. PinkyStaking(stakingToken_, rewardToken_) = ($token, IMD): PINKY stakers earn the IMD that broken promises forfeit, streamed over seven days. Anyone may add at least 0.01 IMD with notify; an addition never lowers the stream's rate, and the stream pauses while nobody is staked and resumes for the time it had left. It has no owner and no settings. PinkyVault(owner_, imd_, staking_, intake_, action_, signer_, minBond_, panelSize_, quorum_, validForSeconds_) = ($owner, IMD, PinkyStaking, the IdentityMD Intake 0x1397434cd35e8a9c8ac312a61d3a285eb31dea56 on Robinhood Chain, bytes32(\"oracle.request@oracle-1\"), the oracle signer 0x5598aa9146215bc13eb26f2c692ad1461fd32982, minimum bond 5 IMD = 5000000000000000000, panel size 7, quorum 5, answers valid for 86400 seconds). A deployer bonds IMD behind a promise not to move more than maxOut of a token out of their wallet before a deadline; the bond must also cover three oracle fees at the Intake's quote, and make refuses while the Intake quotes no price. After the term anyone closes the promise and, 32 blocks later, asks: the vault pays the Intake's current price out of the bond for a log-sum oracle.request over the exact block range, and the Intake calls back onOracleResult with the signed attestation, which the vault verifies in its own EIP-712 domain against the chain id, both block numbers, the panel and quorum the request was bought with, and agreed >= quorum. A kept promise returns the rest of the bond to the maker; a broken one pays 10% to the first wallet that asked (none when that is the maker), half of the remainder to PinkyStaking (burned when nobody is staked) and the rest to 0x000000000000000000000000000000000000dEaD. With no answer, ask may be repeated after a day, three times in all; after that, or seven days after closing, what is left is refunded to the maker. The owner comes from policy via $owner and may change the Intake and action id (setProtocol), the signer (setSigner) and the panel (setPanel); it cannot move funds. Each promise records the Intake, action and price it was made under: that Intake may raise its price and the bond pays it, while any other Intake or action the owner sets later is capped at the recorded price, and a panel change applies to new requests only. IMD, PinkyStaking and the minimum bond are immutable. Constructors call no other contract. No initialization calls."
+  "notes": "Pinky's second vault on Robinhood Chain (chain id 4663). No token and no pool: PINKY (0xb125c461c00863aacad4cc99311d2f23d4342a6f) and PinkyStaking (0x17fb2067652bcf4803e937cf323a248ff6b7cba3) are already live from launch #1166, whose manifest is kept in launches/1166-launch.json, and the first vault PinkyVault (0x3c81384aa1ca064316576a214e2fb30969992772) stays live beside this one. PinkyVaultV2(owner_, imd_, staking_, intake_, action_, signer_, minBond_, panelSize_, quorum_, validForSeconds_) = ($owner, IMD on Robinhood Chain 0x5f7bb59365ce557c26dbcaa4ee9d39a4b95b7127, the live PinkyStaking 0x17fb2067652bcf4803e937cf323a248ff6b7cba3, the IdentityMD Intake version 2 0xa43e6f75ee006411f79ac1c84120606c2330de82, bytes32(\"oracle.request@oracle-1\"), the oracle signer 0x5598aa9146215bc13eb26f2c692ad1461fd32982, minimum bond 5 IMD = 5000000000000000000, panel size 7, quorum 5, answers valid for 86400 seconds). The constructor stores these and calls no other contract; staking_ is also the first fee sink. A holder bonds IMD behind one of four promises about their own wallet: Keep (no more than amount of token sent out: log-sum of Transfer filtered on from), Pay (at least amount sent to target: log-sum filtered on from and to), Hold (balanceOf(maker) at least amount at the closing block: call-compare, bool answer) or Moves (no more than amount transfers out: log-count filtered on from, meant for NFTs). A promise may name a beneficiary. Two minutes after the deadline anyone calls settle, which ends the window 32 blocks behind the head and pays the Intake from the bond for one oracle.request through requestWithFailure in the same call; the Intake calls back onOracleResult with the signed attestation, verified in the vault's own EIP-712 domain against the chain id, both block numbers, the panel and quorum the request was bought with and agreed >= quorum, or onOracleFailure on a refusal or a panel that did not agree, which is unsigned, moves no funds and only lets anyone ask again at once. Neither callback moves funds. payout, by anyone: a kept promise returns the bond to the maker less 1%; a broken promise with a beneficiary pays the beneficiary the bond less 1%; a broken promise without one pays 10% to the first non-maker asker, half the rest to PinkyStaking (burned when nobody is staked) and the rest to 0x000000000000000000000000000000000000dEaD, with no fee. The 1% accrues in the vault and anyone sends it to the fee sink with sendFees, which keeps it when the sink refuses. With no answer, ask may be repeated after a day or at once after a failure report, three times in all; after that, or seven days after closing, the rest is refunded to the maker with no fee. The owner comes from the request's owner field via $owner and can move no funds; it may only propose a new Intake and action, signer, panel or fee sink, each applied by anyone after seven days, and cancel a proposal. IMD, PinkyStaking and the minimum bond are immutable. No initialization calls."
 }
