@@ -22,8 +22,8 @@
 </head>
 <body>
 <main>
-  <h1>Oracle test</h1>
-  <p>One paid question to the IdentityMD oracle on Robinhood Chain: 0.5 IMD. Two transactions, both signed in your wallet.</p>
+  <h1 id="title">Oracle test</h1>
+  <p id="intro">One paid question to the IdentityMD oracle on Robinhood Chain: 0.5 IMD. Two transactions, both signed in your wallet.</p>
 
   <div class="card">
     <dl>
@@ -32,7 +32,7 @@
       <dt>Network</dt><dd id="net">—</dd>
       <dt>IMD (Robinhood)</dt><dd class="mono" id="imd"></dd>
       <dt>Intake</dt><dd class="mono" id="intake"></dd>
-      <dt>Expected answer</dt><dd class="mono" id="exp"></dd>
+      <dt id="expTitle">Expected answer</dt><dd class="mono" id="exp"></dd>
     </dl>
     <button id="connect">Connect wallet</button>
   </div>
@@ -44,14 +44,14 @@
   </div>
 
   <div class="card">
-    <p><b>2.</b> Ask. The Intake pulls the 0.5 IMD and emits the question.</p>
+    <p><b>2.</b> <span id="stepAsk">Ask. The Intake pulls the 0.5 IMD and emits the question.</span></p>
     <button id="ask" disabled>Send the question</button>
     <p class="mono" id="askTx"></p>
     <p id="follow"></p>
   </div>
 
   <div class="card">
-    <p>The question body</p>
+    <p>The request body</p>
     <p class="mono" id="body"></p>
   </div>
 
@@ -142,6 +142,11 @@ fetch(file).then((r) => r.json()).then((c) => {
   $('intake').textContent = c.intake;
   $('exp').textContent = c.expectedLabel || c.expectedSumWei + ' wei (6.2152 IMD)';
   $('body').textContent = c.body;
+  if (c.title) { $('title').textContent = c.title; document.title = 'Pinky · ' + c.title; }
+  if (c.intro) $('intro').textContent = c.intro;
+  if (c.expectedTitle) $('expTitle').textContent = c.expectedTitle;
+  if (c.stepAsk) $('stepAsk').textContent = c.stepAsk;
+  if (c.buttonAsk) $('ask').textContent = c.buttonAsk;
 }).catch((e) => log('Could not load the calldata: ' + e.message, 'bad'));
 </script>
 </body>
