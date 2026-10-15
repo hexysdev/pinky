@@ -62,7 +62,9 @@ request a bond paid for stays answerable until a verdict lands, so a late answer
 request still counts, and the first watcher to ask keeps the bounty. After three failed attempts,
 or seven days after closing, `refund(id)` returns what is left to the maker.
 
-## The second vault (PinkyVaultV2, not deployed yet)
+## The second vault (PinkyVaultV2)
+
+Live on Robinhood Chain since 2026-10-15: [`0x35fc6223307b55814a1a7a1b07c9c00d88e2b55c`](https://robinhoodchain.blockscout.com/address/0x35fc6223307b55814a1a7a1b07c9c00d88e2b55c), IMD launch #1840 ([source as deployed](https://github.com/identity-md-launches/launch-1840-pinkyvaultv2)), verified on [Sourcify](https://repo.sourcify.dev/4663/0x35fc6223307b55814a1a7a1b07c9c00d88e2b55c). The sources here are the deployed ones.
 
 `src/PinkyVaultV2.sol` is launched beside the first vault, reusing PINKY and PinkyStaking; its
 manifest is `launch.json` (the first launch's is kept in `launches/1166-launch.json`). It adds:
@@ -72,11 +74,55 @@ manifest is `launch.json` (the first launch's is kept in `launches/1166-launch.j
 | Four kinds | **Keep**: no more than N of a token out (the first vault's promise). **Pay**: at least N of a token sent to a named address (log-sum filtered on `from` and `to`, tested live on 2026-10-14). **Hold**: at least N held at the closing block (`call-compare` on `balanceOf`, so NFTs and staked balances too; checked once, at the end). **Moves**: no more than N transfers out (`log-count`, for NFTs) |
 | A beneficiary | A promise can be made to someone. Broken, the bond goes to them, less 1% |
 | A fee | 1% of every bond that goes home or to a beneficiary, sent to PinkyStaking. None on the public split or a refund |
-| One call to settle | `settle(id)` closes the window 32 blocks behind the head and asks at once, two minutes after the deadline |
+| Two calls to settle | `settle(id)` ends the term at the current block (the maker from the deadline, anyone else two minutes later) and, called again 32 blocks later, buys the oracle's answer. `close(id)` and `ask(id)` are the same two steps by name |
 | Intake v2 | Asks with `requestWithFailure`: a refusal or a panel that did not agree is reported at once. The report is unsigned, moves no funds and only lets anyone ask again without the day's wait |
 | Slow settings | The owner can only propose a new Intake, signer, panel or fee sink; anyone applies it seven days later |
 
 Tests: `test/PinkyVaultV2.t.sol`.
+
+Launch (`launch.json`): Robinhood Chain (chain id 4663), contracts only, no token and no pool.
+The owner is the launch's `$owner`, `0x89d6584e733ece619c9c34f9a370e1dff5ecf8ef`, the wallet that
+made the live oracle tests and promise #1. IMD, PinkyStaking and the minimum bond of 5 IMD are
+immutable; the Intake (version 2), the action, the signer, the panel of seven with a quorum of five
+and the fee sink start from the constructor and change only through a seven-day proposal.
+
+The second vault's own limits, beside those under "Trust and known limits":
+
+- **The window ends at the closing block, and the ask waits 32 blocks.** The window runs from
+  the block of `make` to the block of `close` (or the first `settle`), as in the first vault, so
+  it covers every block of the term however few the chain minted: Robinhood Chain mints a block
+  only when a transaction arrives, so nothing earlier than the closing block is known to lie past
+  the deadline. The oracle wants that block confirmed, so `ask` (or the second `settle`) refuses
+  with `TooEarly` until 32 more blocks exist; on a quiet chain every refused call mints one.
+- **Close on time.** Whatever the wallet does between the deadline and the close is judged too,
+  and nobody has to close. The maker may close from the deadline itself; anyone else two minutes
+  later. A maker who closes at the deadline is judged on the term alone and nobody can stretch the
+  window first; one who waits is judged until someone else closes.
+- **Asking again.** Anyone may ask again after a day, or at once after a failure report, three
+  times in all, each time from the bond. Once the bond could be refunded (seven days after the
+  close), only the maker or the beneficiary may ask again, so a stranger cannot push the refund
+  back a day at a time.
+- **The bounty.** The 10% of a broken, beneficiary-less bond goes to the first asker unless that
+  is the maker's own address. No contract rule can tell a maker's second wallet from a watcher,
+  so read the sure penalty as 90% of the remaining bond and the bounty as a rebate to whoever asks
+  first, as for the first vault.
+- **Hold and Moves are untested live.** Only the `log-sum` recipe (Keep, Pay) has a recorded
+  oracle answer (`requests/oracle-test2.body.json`, 2026-10-14). The `call-compare` recipe (Hold)
+  and the `log-count` recipe (Moves) have not been bought from the live oracle. If the oracle
+  refuses one, every promise of that kind pays up to three fees (1.5 IMD) and is refunded without
+  a verdict, and a beneficiary of such a promise is never paid. Before anyone bonds behind a Hold
+  or Moves promise, buy one request of each kind through the Intake from a funded wallet; the
+  bodies the vault sends are printed by `bodyOf(id)` after `close`.
+- **A proposal applies to open promises.** A signer or Intake proposed today takes effect in
+  seven days, inside the term of any promise then open (terms run up to 30 days, and a maker
+  cannot leave early). The owner, with a signer of their own, could then sign any verdict for
+  those promises, and decide the verdict of every promise then open; with an Intake of their own,
+  route up to three fees per promise, never more per request than the price at `make`. The
+  proposal is a public event and the seven days are the notice; there is no early exit. A request
+  bought before a signer change stays answerable by the signer it was bought under (recorded in
+  `terms(id)` at each ask), so a rotation costs no promise its fee. This is the owner role the
+  brief asks for, held by the wallet above. An Intake proposal is refused up front if the address
+  has no code.
 
 ## Where IMD is used
 

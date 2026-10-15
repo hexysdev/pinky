@@ -1,5 +1,128 @@
 # Adaptation notes
 
+Two launches share this repository. The second vault's launch is first; the first launch's notes
+follow, kept for the record because the contracts they describe are live.
+
+# Launch 2: PinkyVaultV2, contracts only, Robinhood Chain (chain id 4663)
+
+The launch deploys one contract, `PinkyVaultV2`, beside the live first vault, with the constructor
+arguments the requester wrote in `launch.json`: `$owner` (resolving to
+`0x89d6584e733ece619c9c34f9a370e1dff5ecf8ef`, the launch's owner), the live IMD, the live
+PinkyStaking from launch #1166, the Intake version 2, the action id, the oracle signer, the minimum
+bond, the panel, the quorum and the validity. No token, pool or distributor is added: the brief
+asks for a contracts-only launch, and PINKY and PinkyStaking are reused as they are.
+
+## What arrived and needed no change
+
+Checked against the evm_contracts reference and the protected floor before anything was touched:
+
+- **Constructor.** Ten arguments of static types (`address`, `bytes32`, `uint256`, `uint16`,
+  `uint32`), under the manifest's 16, nonpayable, no initializer, no proxy, no post-deployment
+  call. It stores every value and calls no other contract, so it runs on the floor's empty chain;
+  the Intake, the token and the staking contract are first used by `make`, `ask` and `payout`.
+- **Owner.** The owner is the first constructor argument, filled by `$owner`; never `msg.sender`
+  (the factory) or `tx.origin`. The owner moves no funds: it only proposes an Intake and action, a
+  signer, a panel or a fee sink, each applied by anyone after seven days, and can cancel a proposal.
+  IMD, PinkyStaking and the minimum bond are immutable.
+- **Forbidden capabilities.** No mint, pause, freeze, blacklist or seizure of holder balances, no
+  DELEGATECALL, CALLCODE or SELFDESTRUCT, no upgrade path. Every library function the contract
+  calls is `internal`; `src/OracleAttestation.sol` is byte-identical to the oracle-consumer
+  reference's copy.
+- **Oracle protocol.** The 15-field `Attestation` struct, the consumer's own EIP-712 domain, the
+  callback and failure selectors with the protocol's parameter types, `agreed >= quorum`, the panel
+  and quorum checked against what the request was bought with, the request bound to the calling
+  Intake and its own request id, nothing moved in either callback, and a refund path after a
+  deadline. Intake version 2 is used through `requestWithFailure` as the brief asks, and the
+  protocol values are constructor input and owner-settable, as the reference requires.
+- **Manifest.** `launch.json` is the requester's; the manifest step owns it and nothing in it
+  changed. Its ten arguments match the constructor's declaration order and types.
+
+## Audit findings that reproduced and were fixed
+
+Reproduced against the unchanged code in a scratch test (`test/scratch/Probe.t.sol`, deleted
+before submission) before the fix.
+
+| Finding | File | Change | Test |
+| --- | --- | --- | --- |
+| [low] `close` collapses the judged window to the make block when fewer than 32 chain blocks have passed since `make` | `src/PinkyVaultV2.sol` `_close` | Reproduced: with the head 20 blocks past `make`, `settle` reverted `TooEarly` but `close` succeeded and recorded `endBlock == startBlock`, a one-block window that left the whole term out. The first round's fix (refuse to close until 32 blocks exist behind the head) was replaced in the revision below by the first vault's design: the window now ends at the closing block itself, so there is nothing to collapse and the guard is gone. A term with five blocks in it closes with the window [make, close]. | `test/PinkyVaultV2.t.sol`: `test_AShortQuietTermStillClosesAtTheHead`, `test_TheWindowCoversTheWholeTermOnAQuietChain` |
+
+## Launch review findings (revision)
+
+The launch's independent review reopened the work with one reproducible finding and seven
+advisory ones. Each was reproduced on the accepted tree before anything changed: the reviewer's
+proof `Proof_92eac51fecc7.t.sol` failed on it (run from `test/scratch/`, "window ends before a
+block of the term: 1009 < 1010") and passes on this tree; the three advisory findings changed below
+were reproduced in a scratch probe first. The answers are in `.imd-responses.json`.
+
+| Finding | File | Change | Test |
+| --- | --- | --- | --- |
+| [medium] `close`/`settle` end the judged window 32 blocks behind the closing head, not at the deadline, so a breach late in the term is cut out on a quiet chain | `src/PinkyVaultV2.sol` `_close`, `settle`, `close`, `ask` | Reproduced exactly as described: on a chain that mints a block only when a transaction arrives, 31 blocks after an in-term transfer left `endBlock = head - 32` before the transfer. The fix is the first vault's design, which the reviewer proposed as the minimal one: `_close` records `endBlock` as the closing block itself (nothing earlier is known to lie past the deadline), and `_ask` keeps its existing wait of 32 blocks after `endBlock` so the oracle gets a confirmed closing block. The one-call `settle` could not survive this (the closing block cannot be 32 blocks old in the transaction that chooses it), so `settle` now does whichever step is next: it closes an Active promise and returns zero, and asks for a Closed one; `close` and `ask` are the same two steps by name. The head-must-be-32-past-make guard from the audit fix above is no longer needed and was removed. | `test/PinkyVaultV2.t.sol`: `test_TheWindowCoversTheWholeTermOnAQuietChain`, `test_SettleClosesAtTheHeadAndAsksThirtyTwoBlocksLater`, `test_SettleUsesTheArbitrumBlockNumber`, `test_CloseAloneThenAsk`; every settlement test now closes, rolls 32 blocks and asks; the reviewer's proof |
+| [low] the judged window has no upper bound tied to the deadline; whoever closes last chooses how much post-term conduct is judged | `src/PinkyVaultV2.sol` `_close`, `CLOSE_GRACE` | Real, and the reviewer's first option is taken: the maker may close from the deadline itself, anyone else two minutes later (`CLOSE_GRACE`, which no longer has its old purpose). A maker who closes on time is judged on the term alone and nobody else can stretch the window first. A maker who does not close is judged until someone does, as in the first vault; the contract cannot know which past block was the first past the deadline, so the README says to close on time. | `test/PinkyVaultV2.t.sol`: `test_TheMakerMayCloseAtTheDeadlineAndOthersAfterTheGrace` |
+| [low] `enact(Signer)` applies to requests already bought and in flight, so the old key's answer is refused and the bond pays another fee after a day | `src/PinkyVaultV2.sol` `Terms`, `_ask`, `onOracleResult`, `_verifyAttestationFrom` | Real (reproduced in a scratch probe). `_ask` records the signer the request is bought under in `terms(id).signer`, and `onOracleResult` accepts a signature from either that signer or the current one, with the same window checks as `_verifyAttestation`, which still runs unchanged when the two are the same. A rotation thus applies to requests bought after it. `terms(id)` gained one trailing field; `promises(id)` is unchanged. The callback still fits the Intake's stipend (`test_EveryVerdictFitsTheIntakesGas`, under 150,000 gas). | `test/PinkyVaultV2.t.sol`: `test_ARequestBoughtUnderTheOldSignerSurvivesARotation` |
+| [low] anyone can re-ask a stranded promise at the moment its refund becomes due, taking 0.5 IMD from the bond and adding a day, three times | `src/PinkyVaultV2.sol` `_ask` | Real (reproduced: the maker ended with 98.5 of 100 IMD at day 10 instead of 100 at day 7). Once `closedAt + REFUND_GRACE` has passed, only the maker or the beneficiary may ask; `NotAParty` otherwise. Before that, asking stays open to anyone, as designed. | `test/PinkyVaultV2.t.sol`: `test_OnlyThePartiesMayAskOnceTheRefundIsDue`, `test_AnyoneMayAskBeforeTheRefundIsDue` |
+| [low] `proposeProtocol` accepts an Intake address without code | `src/PinkyVaultV2.sol` `proposeProtocol` | Real (reproduced: after the enact, `make` reverted). The proposal now requires code at the address, as `proposeFeeSink` does. The constructor still checks nothing, since the launch checks run it on an empty chain. | `test/PinkyVaultV2.t.sol`: `test_ProposeProtocolRefusesAnIntakeWithoutCode` |
+| [info] a fee sink whose `notify` succeeds but pulls less than the fees makes `sendFees` revert until a new sink is enacted | `src/PinkyVaultV2.sol` `sendFees` natspec | Reproduces as described and the behaviour is kept: a sink that takes a different amount than it was offered is refused loudly, and the revert keeps the fees here. The natspec now says so. | none (documentation; the reviewer's own test covers the behaviour) |
+
+### Advisory findings not changed
+
+- **[low] after one seven-day delay the owner can point the vault at an Intake and a signer it
+  controls and decide the verdict of every promise still open.** Reproduces and is the owner role
+  the brief asks for: the oracle-consumer reference requires the Intake, action and signer to be
+  owner-settable, and the seven-day proposal is the requester's chosen protection. Pinning the
+  signer at `make` would strand every open promise on a legitimate rotation, which is the case
+  the setting exists for. Not changed; the README's "A proposal applies to open promises" now
+  states the assumption in full (the owner can decide the verdict of every promise open at the
+  enact; the proposal is the notice and there is no early exit). The `launch.json` notes say the
+  owner "can move no funds": that sentence belongs to the manifest step and should read that the
+  owner moves no funds directly but, through a signer and Intake of its own after seven days'
+  public notice, decides the verdicts of promises then open.
+- **[low] the "no bounty for the maker" rule is bypassed by asking from any other wallet.**
+  Reproduces and cannot be enforced on chain, as the reviewer says. The address comparison stays
+  (it closes the plain path at no cost); the README now says the bounty is a rebate to whoever
+  asks first and the sure penalty is 90% of the remaining bond. The `launch.json` notes' "10% to
+  the first non-maker asker" should read "to the first asker, unless that is the maker's own
+  address"; that file is the manifest step's.
+
+### What the manifest step needs to know
+
+The `launch.json` notes describe the accepted tree's one-call `settle` ("ends the window 32 blocks
+behind the head and pays the Intake ... in the same call"). On this tree the window ends at the
+closing block, the maker may close from the deadline and anyone two minutes later, and the ask is
+a second `settle` (or `ask`) 32 blocks later. Constructor arguments are unchanged.
+
+## Audit findings not changed
+
+- **[info] Hold (`call-compare`) and Moves (`log-count`) recipes have no live attestation
+  evidence.** Reproduces as stated: only the `log-sum` recipe has a recorded live answer
+  (`requests/oracle-test2.body.json`), and the recipe grammar is not in any pinned read. It is not
+  a defect in the Solidity and cannot be checked offline; a live request needs a funded wallet,
+  which this task does not hold and must not use. Kept as the requester wrote it, since the brief
+  names all four kinds. Recorded in the README as the pre-launch check: buy one Hold and one Moves
+  request through the Intake before anyone bonds behind those kinds. The cost of a refusal is
+  bounded by the contract (three fees, then a refund with no verdict).
+- **[info] a signer or protocol proposal enacted after seven days applies to promises already
+  open.** Reproduces: a promise may run 30 days and a maker cannot exit early, so a change
+  proposed inside a term takes effect inside it. This is the owner role the brief asks for and the
+  oracle-consumer reference requires (every protocol value owner-settable, never a constant); the
+  seven-day delay is the requester's design. Not changed. The README now states the trust
+  assumption in full and names the owner: the launch's `$owner`,
+  `0x89d6584e733ece619c9c34f9a370e1dff5ecf8ef`.
+- **[info] coverage statement.** Not a defect. Its checks were repeated here where they could be:
+  the build, the project's tests, the runtime size and opcode scan on an empty chain 4663 with the
+  `launch.json` arguments. Its live reads (Intake price, staking state, ArbSys) were not repeated;
+  nothing in this work depends on them.
+
+## Checks run
+
+`forge build` and `forge test` with the project's own `foundry.toml` and the verifier's fuzz seed:
+185 tests pass (the 47 second-vault tests, the first vault's unit, edge and invariant tests,
+staking, the launch token and the protocol's oracle conformance vectors), plus the reviewer's proof
+from `test/scratch/`. The runtime is 18,533 bytes, under 24,576, and the floor's opcode walk
+(skipping PUSH data) finds no DELEGATECALL / CALLCODE / SELFDESTRUCT; the constructor is unchanged
+and still calls no other contract. No transaction, key or live read was used.
+
+# Launch 1 (#1166): PINKY, PinkyStaking and the first vault
+
 Pinky arrived already shaped for the ProjectFactory: `LaunchToken` (Pinky / PINKY, 10^27 minor
 units to `msg.sender`, no other functions), `PinkyStaking(address, address)` and
 `PinkyVault(address, address, address, address, bytes32, address, uint256, uint16, uint16, uint32)`
