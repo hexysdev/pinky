@@ -38,7 +38,7 @@ contract StipendIntake is MockIntake {
         external
         returns (bool ok)
     {
-        (address target, bytes4 selector,) = this.requests(requestId);
+        (address target, bytes4 selector,,) = this.requests(requestId);
         (ok,) = target.call{gas: 200_000}(abi.encodePacked(selector, abi.encode(requestId, a, signature)));
     }
 }

@@ -20,6 +20,7 @@ contract MockIntake is IIntake {
         address target;
         bytes4 selector;
         bytes body;
+        bytes4 onFailure;
     }
 
     address public immutable payee;
@@ -49,8 +50,40 @@ contract MockIntake is IIntake {
         require(amount >= price, "PriceNotMet");
         IERC20(asset).transferFrom(msg.sender, payee, amount);
         requestId = keccak256(abi.encode(address(this), ++nonce));
-        requests[requestId] = Request(callback.target, callback.selector, body);
+        requests[requestId] = Request(callback.target, callback.selector, body, bytes4(0));
         lastRequestId = requestId;
+    }
+
+    /// @dev Version 2's request: the same, plus a function for a refusal or a failure.
+    function requestWithFailure(
+        bytes32,
+        bytes calldata body,
+        Callback calldata callback,
+        bytes4 onFailure,
+        address asset,
+        uint256 amount
+    ) external returns (bytes32 requestId) {
+        require(amount >= price, "PriceNotMet");
+        require(onFailure == bytes4(0) || callback.target != address(0), "FailureHookWithoutTarget");
+        IERC20(asset).transferFrom(msg.sender, payee, amount);
+        requestId = keccak256(abi.encode(address(this), ++nonce));
+        requests[requestId] = Request(callback.target, callback.selector, body, onFailure);
+        lastRequestId = requestId;
+    }
+
+    /// @dev Plays the writer reporting a refusal (status 1) or no result (status 2).
+    function fail(bytes32 requestId, uint8 status, bytes32 reason) external returns (uint256 gasUsed) {
+        Request storage r = requests[requestId];
+        uint256 before = gasleft();
+        (bool ok, bytes memory out) = r.target.call(
+            abi.encodeWithSelector(r.onFailure, requestId, status, reason, uint16(3), uint16(7), bytes(""))
+        );
+        gasUsed = before - gasleft();
+        if (!ok) {
+            assembly {
+                revert(add(out, 32), mload(out))
+            }
+        }
     }
 
     function bodyOf(bytes32 requestId) external view returns (bytes memory) {

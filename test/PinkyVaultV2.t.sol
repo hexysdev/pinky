@@ -71,15 +71,15 @@ contract PinkyVaultV2Test is Test {
     }
 
     function _window(uint256 id) internal view returns (uint64 startBlock, uint64 endBlock) {
-        (,,,,,,,,,, startBlock, endBlock,,,,,,,) = vault.promises(id);
+        (,,,,,,,,,, startBlock, endBlock,,,,,,,,) = vault.promises(id);
     }
 
     function _status(uint256 id) internal view returns (PinkyVaultV2.Status status) {
-        (,,, status,,,,,,,,,,,,,,,) = vault.promises(id);
+        (,,, status,,,,,,,,,,,,,,,,) = vault.promises(id);
     }
 
     function _bond(uint256 id) internal view returns (uint256 bond) {
-        (,,,,,,,,, bond,,,,,,,,,) = vault.promises(id);
+        (,,,,,,,,, bond,,,,,,,,,,) = vault.promises(id);
     }
 
     function _attestation(uint256 id, uint8 answerType, bytes memory answer, uint256 figure)
@@ -137,7 +137,7 @@ contract PinkyVaultV2Test is Test {
         uint256 d = _make(PinkyVaultV2.Kind.Moves, address(0), address(0));
         assertEq(vault.count(), 4);
         assertEq(imd.balanceOf(address(vault)), 4 * BOND);
-        (address m, address t, PinkyVaultV2.Kind kind,,,, uint256 amount, address target, address beneficiary,,,,,,,,,,)
+        (address m, address t, PinkyVaultV2.Kind kind,,,, uint256 amount, address target, address beneficiary,,,,,,,,,,,)
         = vault.promises(b);
         assertEq(m, maker);
         assertEq(t, address(token));
@@ -373,7 +373,7 @@ contract PinkyVaultV2Test is Test {
         _answerBool(b, rb, false, 3 ether);
         assertEq(uint8(_status(a)), uint8(PinkyVaultV2.Status.Kept));
         assertEq(uint8(_status(b)), uint8(PinkyVaultV2.Status.Broken));
-        (,,,,,,,,,,,,,,,,,, uint256 observed) = vault.promises(b);
+        (,,,,,,,,,,,,,,,,,, uint256 observed,) = vault.promises(b);
         assertEq(observed, 3 ether);
     }
 
@@ -510,6 +510,79 @@ contract PinkyVaultV2Test is Test {
         vault.ask(id);
         _answerUint(id, first, 0);
         assertEq(uint8(_status(id)), uint8(PinkyVaultV2.Status.Kept));
+    }
+
+    // ───────────────────────── failures ─────────────────────────
+
+    function test_AFailureLetsAnyoneAskAgainAtOnce() public {
+        uint256 id = _keep();
+        bytes32 first = _settle(id);
+        vm.expectRevert(PinkyVaultV2.TooEarly.selector);
+        vault.ask(id);
+        intake.fail(first, 2, bytes32("disagreed"));
+        bytes32 second = vault.ask(id);
+        assertTrue(second != first);
+        assertEq(_bond(id), BOND - 2 * PRICE);
+        _answerUint(id, second, 0);
+        assertEq(uint8(_status(id)), uint8(PinkyVaultV2.Status.Kept));
+    }
+
+    function test_AFailureMovesNoMoneyAndRefundsStillWait() public {
+        uint256 id = _keep();
+        bytes32 requestId = _settle(id);
+        uint256 vaultBefore = imd.balanceOf(address(vault));
+        intake.fail(requestId, 1, bytes32("refused"));
+        assertEq(imd.balanceOf(address(vault)), vaultBefore);
+        assertEq(uint8(_status(id)), uint8(PinkyVaultV2.Status.Asked));
+        vm.expectRevert(PinkyVaultV2.TooEarly.selector);
+        vault.refund(id);
+        // Three failures in a row: the refund still waits out the last day, as without reports.
+        bytes32 r2 = vault.ask(id);
+        intake.fail(r2, 2, bytes32("failed"));
+        bytes32 r3 = vault.ask(id);
+        intake.fail(r3, 2, bytes32("failed"));
+        vm.expectRevert(PinkyVaultV2.NoAttemptsLeft.selector);
+        vault.ask(id);
+        vm.expectRevert(PinkyVaultV2.TooEarly.selector);
+        vault.refund(id);
+        vm.warp(vm.getBlockTimestamp() + 1 days);
+        uint256 before = imd.balanceOf(maker);
+        vault.refund(id);
+        assertEq(imd.balanceOf(maker) - before, BOND - 3 * PRICE);
+    }
+
+    function test_AFailedRequestCannotBeAnsweredAfterwards() public {
+        uint256 id = _keep();
+        bytes32 requestId = _settle(id);
+        intake.fail(requestId, 2, bytes32("disagreed"));
+        OracleAttestation.Attestation memory a = _attestation(id, 3, abi.encode(uint256(0)), 0);
+        bytes memory sig = _sign(a);
+        vm.expectRevert(PinkyVaultV2.UnknownRequest.selector);
+        intake.complete(requestId, a, sig);
+    }
+
+    function test_OnlyTheIntakeReportsAndOnlyForItsOwnRequests() public {
+        uint256 id = _keep();
+        bytes32 requestId = _settle(id);
+        vm.expectRevert(PinkyVaultV2.UnknownRequest.selector);
+        vault.onOracleFailure(requestId, 2, bytes32("failed"), 0, 0, "");
+        vm.prank(address(intake));
+        vm.expectRevert(PinkyVaultV2.UnknownRequest.selector);
+        vault.onOracleFailure(keccak256("someone else's"), 2, bytes32("failed"), 0, 0, "");
+        // A report about an earlier request does not unlock asking again.
+        vm.warp(vm.getBlockTimestamp() + 1 days);
+        bytes32 second = vault.ask(id);
+        intake.fail(requestId, 2, bytes32("failed"));
+        vm.expectRevert(PinkyVaultV2.TooEarly.selector);
+        vault.ask(id);
+        _answerUint(id, second, 0);
+        assertEq(uint8(_status(id)), uint8(PinkyVaultV2.Status.Kept));
+    }
+
+    function test_AFailureReportFitsTheIntakesGas() public {
+        uint256 id = _keep();
+        bytes32 requestId = _settle(id);
+        assertLt(intake.fail(requestId, 2, bytes32("disagreed")), 60_000);
     }
 
     // ───────────────────────── fees ─────────────────────────

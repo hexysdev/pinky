@@ -6,7 +6,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
 import {OracleAttestation, OracleAttestationConsumer} from "./OracleAttestation.sol";
-import {IIntake} from "./interfaces/IIntake.sol";
+import {IIntakeV2} from "./interfaces/IIntakeV2.sol";
 
 /// @dev Where the fee goes. PinkyStaking has exactly this: it pulls `amount` from the caller and
 /// streams it to stakers. A later contract with the same function can take its place.
@@ -35,6 +35,10 @@ interface IStakingPool {
 /// beneficiary pays the beneficiary the bond less the same fee; one made to nobody is split as in
 /// the first vault: 10% to the first watcher who asked, half the rest to PINKY stakers, the rest
 /// burned. Fees accrue here and are sent to the fee sink, PinkyStaking at launch, by anyone.
+///
+/// Questions go through the Intake's version 2, which also reports a refusal or a panel that did not
+/// agree. Such a report is unsigned, so it moves no money: it only lets anyone ask again at once
+/// instead of after a day.
 ///
 /// The owner can change the oracle's Intake and action, its signer, the panel and the fee sink,
 /// each only through a proposal that takes effect after seven days, in the open.
@@ -82,6 +86,8 @@ contract PinkyVaultV2 is OracleAttestationConsumer, ReentrancyGuard {
         bytes32 requestId;
         /// @dev What the oracle counted: the sum, the number of transfers, or the balance compared.
         uint256 observed;
+        /// @dev The Intake reported that the latest request ended without an answer.
+        bool failed;
     }
 
     /// @dev What a promise was bought under, as in the first vault: the Intake, action and price
@@ -131,6 +137,10 @@ contract PinkyVaultV2 is OracleAttestationConsumer, ReentrancyGuard {
     event Closed(uint256 indexed id, uint64 endBlock);
     event Asked(uint256 indexed id, address indexed asker, bytes32 indexed requestId, uint256 price);
     event Verdict(uint256 indexed id, bytes32 indexed oracleRequestId, bool kept, uint256 observed);
+    /// @dev `status` 1: refused, 2: no result. `agreed` of `answered` panel members gave the leading answer.
+    event AskFailed(
+        uint256 indexed id, bytes32 indexed requestId, uint8 status, bytes32 reason, uint16 agreed, uint16 answered
+    );
     event Paid(
         uint256 indexed id,
         uint256 toMaker,
@@ -177,7 +187,7 @@ contract PinkyVaultV2 is OracleAttestationConsumer, ReentrancyGuard {
     IStakingPool public immutable staking;
     uint256 public immutable minBond;
 
-    IIntake public intake;
+    IIntakeV2 public intake;
     bytes32 public action;
     uint16 public panelSize;
     uint16 public quorum;
@@ -251,7 +261,7 @@ contract PinkyVaultV2 is OracleAttestationConsumer, ReentrancyGuard {
             if (kind == Kind.Hold && amount == 0) revert InvalidPromise();
         }
 
-        IIntake intake_ = intake;
+        IIntakeV2 intake_ = intake;
         bytes32 action_ = action;
         uint256 price = intake_.priceOf(action_, address(imd));
         // A promise made while the Intake sells nothing could never be settled.
@@ -292,13 +302,15 @@ contract PinkyVaultV2 is OracleAttestationConsumer, ReentrancyGuard {
         _close(id);
     }
 
-    /// @notice Asks for a closed promise, or again when the last request went unanswered for a day.
-    /// @dev Every request this promise paid for stays answerable until a verdict lands. The asker is
-    /// whoever asked first, unless that was the maker, who earns no bounty.
+    /// @notice Asks for a closed promise, or again when the last request failed or went unanswered
+    /// for a day.
+    /// @dev Every request this promise paid for stays answerable until a verdict lands or the Intake
+    /// reports it failed. The asker is whoever asked first, unless that was the maker, who earns no
+    /// bounty.
     function ask(uint256 id) external nonReentrant returns (bytes32 requestId) {
         Promise storage v = _promise(id);
         if (v.status == Status.Asked) {
-            if (block.timestamp < uint256(v.askedAt) + ANSWER_TIMEOUT) revert TooEarly();
+            if (!v.failed && block.timestamp < uint256(v.askedAt) + ANSWER_TIMEOUT) revert TooEarly();
         } else if (v.status != Status.Closed) {
             revert WrongStatus();
         }
@@ -337,6 +349,26 @@ contract PinkyVaultV2 is OracleAttestationConsumer, ReentrancyGuard {
         v.status = kept ? Status.Kept : Status.Broken;
         v.observed = observed;
         emit Verdict(id, a.requestId, kept, observed);
+    }
+
+    /// @notice The Intake's report that a request was refused (status 1) or ended without a result
+    /// (status 2). Unsigned, so it moves no funds and decides nothing: it forgets that request and,
+    /// if it was the latest, lets anyone ask again without waiting a day. Refunds keep their wait.
+    function onOracleFailure(
+        bytes32 requestId,
+        uint8 status,
+        bytes32 reason,
+        uint16 agreed,
+        uint16 answered,
+        bytes calldata
+    ) external nonReentrant {
+        uint256 id = promiseIdFor[msg.sender][requestId];
+        if (id == 0) revert UnknownRequest();
+        Promise storage v = promises[id];
+        if (v.status != Status.Asked) revert WrongStatus();
+        delete promiseIdFor[msg.sender][requestId];
+        if (requestId == v.requestId) v.failed = true;
+        emit AskFailed(id, requestId, status, reason, agreed, answered);
     }
 
     /// @notice Pays out a promise that has its verdict. Anyone may call.
@@ -492,7 +524,7 @@ contract PinkyVaultV2 is OracleAttestationConsumer, ReentrancyGuard {
         if (_chainBlock() < uint256(v.endBlock) + SETTLE_DELAY_BLOCKS) revert TooEarly();
         if (v.attempts >= MAX_ATTEMPTS) revert NoAttemptsLeft();
 
-        IIntake intake_ = intake;
+        IIntakeV2 intake_ = intake;
         bytes32 action_ = action;
         Terms storage t = terms[id];
         uint256 price = intake_.priceOf(action_, address(imd));
@@ -503,6 +535,7 @@ contract PinkyVaultV2 is OracleAttestationConsumer, ReentrancyGuard {
         if (!sameProtocol && price > t.maxPrice) revert InvalidPayment();
 
         v.status = Status.Asked;
+        v.failed = false;
         v.attempts += 1;
         v.bond -= price;
         v.askedAt = uint64(block.timestamp);
@@ -513,10 +546,11 @@ contract PinkyVaultV2 is OracleAttestationConsumer, ReentrancyGuard {
 
         uint256 balanceBefore = imd.balanceOf(address(this));
         imd.forceApprove(address(intake_), price);
-        requestId = intake_.request(
+        requestId = intake_.requestWithFailure(
             action_,
             _body(v, panelSize, quorum),
-            IIntake.Callback(address(this), this.onOracleResult.selector),
+            IIntakeV2.Callback(address(this), this.onOracleResult.selector),
+            this.onOracleFailure.selector,
             address(imd),
             price
         );
@@ -648,7 +682,7 @@ contract PinkyVaultV2 is OracleAttestationConsumer, ReentrancyGuard {
 
     function _setProtocol(address intake_, bytes32 action_) private {
         if (intake_ == address(0) || action_ == bytes32(0)) revert InvalidConfiguration();
-        intake = IIntake(intake_);
+        intake = IIntakeV2(intake_);
         action = action_;
         emit ProtocolSet(intake_, action_);
     }
