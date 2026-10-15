@@ -237,3 +237,18 @@ h3 { font: 700 18px/1.3 var(--sans); margin: 0 0 4px; }
 }
 .hero { padding-top: 40px; padding-bottom: 44px; }
 .form { gap: 10px; padding: 20px 24px 18px; }
+
+/* The kind of promise: a row of pills, the ones not switched on yet greyed out. */
+.kinds { display: flex; flex-wrap: wrap; gap: 5px; }
+.kinds label { display: block; position: relative; }
+.kinds input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.kinds span { display: inline-block; padding: 4px 11px; border: 2px solid var(--line); border-radius: 999px; background: #fff; font: 700 13px var(--sans); cursor: pointer; white-space: nowrap; }
+.kinds input:checked + span { background: var(--wine); border-color: var(--wine); color: var(--ivory); }
+.kinds input:focus-visible + span { border-color: var(--pink); }
+.kinds .soon span { cursor: default; color: var(--ink-soft); background: transparent; }
+.kinds .soon i { font-style: normal; font-weight: 600; font-size: 11px; color: var(--pink-deep); }
+.form label[hidden] { display: none; }
+.to-someone summary { cursor: pointer; font: 700 14px var(--sans); color: var(--ink-soft); text-decoration: underline; text-decoration-color: var(--pink); text-underline-offset: 3px; }
+.to-someone[open] summary { margin-bottom: 8px; }
+.to-someone .fine { margin-top: 6px; }
+#feesLine .share { margin-left: 4px; }

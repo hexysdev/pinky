@@ -7,7 +7,7 @@
 <meta name="robots" content="noindex">
 <script>
   // A promise made a few minutes ago has no page of its own yet: send its link to the board.
-  var m = /^\/p\/(\d+)\/?$/.exec(location.pathname);
+  var m = /^\/p\/((?:v2-)?\d+)\/?$/.exec(location.pathname);
   location.replace(m ? '/#p' + m[1] : '/');
 </script>
 </head>

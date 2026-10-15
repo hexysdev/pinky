@@ -16,6 +16,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const RPC = 'https://rpc.mainnet.chain.robinhood.com';
 const VAULT = '0x3c81384aa1ca064316576a214e2fb30969992772';
+const VAULT2 = '0x35fc6223307b55814a1a7a1b07c9c00d88e2b55c';
 const IMD = '0x5f7bb59365ce557c26dbcaa4ee9d39a4b95b7127';
 const SITE = 'https://pinkybond.fun';
 const OUT = fileURLToPath(new URL('../site/p/', import.meta.url));
@@ -64,40 +65,62 @@ function amount(wei, decimals) {
   return n.toLocaleString('en-US', { maximumFractionDigits: 2 });
 }
 
+// The public node refuses a batch of more than about 55 calls (measured 2026-10-15): split.
+const BATCH = 45;
+async function rpcAll(calls) {
+  const out = [];
+  for (let i = 0; i < calls.length; i += BATCH) out.push(...await rpc(calls.slice(i, i + BATCH)));
+  return out;
+}
+
+const big = (h, i) => BigInt(`0x${word(h, i)}`);
+const addr = (h, i) => `0x${word(h, i).slice(24)}`;
+const ZERO = '0x0000000000000000000000000000000000000000';
+const KINDS = ['Keep', 'Pay', 'Hold', 'Moves'];
+
+/** Both vaults' promises in one shape; `key` is the address on the site: `2` or `v2-1`. */
+function fromV1(id, h) {
+  return {
+    key: String(id), id, vault: 'v1', kind: 'Keep',
+    maker: addr(h, 0), token: addr(h, 1), amount: big(h, 2), bond: big(h, 3),
+    endTime: Number(big(h, 6)), status: STATUS[Number(big(h, 10))], paid: big(h, 11) === 1n,
+    observed: big(h, 15), target: ZERO, beneficiary: ZERO, failed: false,
+  };
+}
+function fromV2(id, h) {
+  return {
+    key: `v2-${id}`, id, vault: 'v2', kind: KINDS[Number(big(h, 2))] ?? 'Keep',
+    maker: addr(h, 0), token: addr(h, 1), status: STATUS[Number(big(h, 3))], paid: big(h, 5) === 1n,
+    amount: big(h, 6), target: addr(h, 7), beneficiary: addr(h, 8), bond: big(h, 9),
+    endTime: Number(big(h, 12)), observed: big(h, 18), failed: big(h, 19) === 1n,
+  };
+}
+
 async function read() {
-  const [countHex] = await rpc([{ to: VAULT, data: '0x06661abd' }]);
-  if (!countHex) throw new Error('the vault did not answer');
-  const count = Number(BigInt(countHex));
-  if (count === 0) return [];
-  const ids = Array.from({ length: count }, (_, i) => i + 1);
-  const rows = await rpc(ids.map((id) => ({ to: VAULT, data: `0x1f06c859${id.toString(16).padStart(64, '0')}` })));
-  const promises = ids.map((id, i) => {
-    const h = rows[i];
-    if (!h) return null;
-    return {
-      id,
-      maker: `0x${word(h, 0).slice(24)}`,
-      token: `0x${word(h, 1).slice(24)}`,
-      maxOut: BigInt(`0x${word(h, 2)}`),
-      bond: BigInt(`0x${word(h, 3)}`),
-      endTime: Number(BigInt(`0x${word(h, 6)}`)),
-      status: STATUS[Number(BigInt(`0x${word(h, 10)}`))],
-      paid: BigInt(`0x${word(h, 11)}`) === 1n,
-      observedOut: BigInt(`0x${word(h, 15)}`),
-    };
-  }).filter(Boolean);
+  const [countHex, count2Hex] = await rpc([{ to: VAULT, data: '0x06661abd' }, { to: VAULT2, data: '0x06661abd' }]);
+  if (!countHex || !count2Hex) throw new Error('a vault did not answer');
+  const ids = (n) => Array.from({ length: Number(BigInt(n)) }, (_, i) => i + 1);
+  const ids1 = ids(countHex), ids2 = ids(count2Hex);
+  const row = (to, id) => ({ to, data: `0x1f06c859${id.toString(16).padStart(64, '0')}` });
+  const rows = await rpcAll([...ids1.map((id) => row(VAULT, id)), ...ids2.map((id) => row(VAULT2, id))]);
+  const promises = [
+    ...ids1.map((id, i) => rows[i] && fromV1(id, rows[i])),
+    ...ids2.map((id, i) => rows[ids1.length + i] && fromV2(id, rows[ids1.length + i])),
+  ].filter(Boolean);
+  if (promises.length === 0) return [];
 
   const tokens = [...new Set(promises.map((p) => p.token))];
-  // For a running promise, also what the wallet holds now: the card weighs the bond against it.
-  const running = promises.filter((p) => p.status === 'Active');
-  const meta = await rpc([
+  // For a running Keep promise, also what the wallet holds now: the card weighs the bond against it.
+  const running = promises.filter((p) => p.status === 'Active' && p.kind === 'Keep');
+  const meta = await rpcAll([
     ...tokens.flatMap((to) => [{ to, data: '0x95d89b41' }, { to, data: '0x313ce567' }]),
     ...running.map((p) => ({ to: p.token, data: `0x70a08231${p.maker.slice(2).padStart(64, '0')}` })),
   ]);
   running.forEach((p, i) => { const h = meta[2 * tokens.length + i]; if (h) p.held = BigInt(h); });
   const info = new Map(tokens.map((t, i) => [t, {
     symbol: meta[2 * i] ? abiString(meta[2 * i]) : '',
-    decimals: meta[2 * i + 1] ? Math.min(36, Number(BigInt(meta[2 * i + 1]))) : 18,
+    // An NFT has no decimals: its amounts are counts.
+    decimals: meta[2 * i + 1] ? Math.min(36, Number(BigInt(meta[2 * i + 1]))) : 0,
   }]));
   for (const p of promises) Object.assign(p, info.get(p.token));
   if (running.length) await weigh(running);
@@ -124,7 +147,7 @@ async function weigh(running) {
   }
   for (const p of running) {
     if (p.held === undefined) continue;
-    const atStake = p.held > p.maxOut ? p.held - p.maxOut : 0n;
+    const atStake = p.held > p.amount ? p.held - p.amount : 0n;
     if (atStake === 0n) { p.cover = 'Right now the wallet holds no more than the limit.'; continue; }
     const tokenUsd = prices[p.token], imdUsd = prices[IMD];
     if (!tokenUsd || !imdUsd) continue;
@@ -136,27 +159,50 @@ async function weigh(running) {
 
 /** The words on the card and in the tags. Same voice as the board. */
 function describe(p, now) {
-  const who = `${p.maker.slice(0, 6)}…${p.maker.slice(-4)}`;
+  const short = (a) => `${a.slice(0, 6)}…${a.slice(-4)}`;
+  const who = short(p.maker);
   const symbol = p.symbol || 'this token';
-  const limit = p.maxOut === 0n ? `a single ${symbol}` : `more than ${amount(p.maxOut, p.decimals)} ${symbol}`;
+  const n = (wei) => `${amount(wei, p.decimals)} ${symbol}`;
   const over = now >= p.endTime;
   const until = `${new Date(p.endTime * 1000).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' })} UTC`;
   const bond = `${amount(p.bond, 18)} IMD`;
+  const to = p.beneficiary !== ZERO ? short(p.beneficiary) : null;
+  let line, found;
+  switch (p.kind) {
+    case 'Pay':
+      line = `${who} ${over ? 'promised to send' : 'will send'} at least ${n(p.amount)} to ${short(p.target)}.`;
+      found = p.observed === 0n ? 'They sent nothing.' : `They sent ${n(p.observed)}.`;
+      break;
+    case 'Hold':
+      line = `${who} ${over ? 'promised to still hold' : 'will still hold'} at least ${n(p.amount)} at the deadline.`;
+      found = `At the deadline they held ${n(p.observed)}.`;
+      break;
+    case 'Moves':
+      line = `${who} ${over ? 'promised not to move' : "won't move"} ${p.amount === 0n ? `a single one of ${symbol}` : `more than ${p.amount} of ${symbol}`}.`;
+      found = `They moved ${p.observed} out.`;
+      break;
+    default:
+      line = `${who} ${over ? 'promised not to move' : "won't move"} ${p.amount === 0n ? `a single ${symbol}` : `more than ${n(p.amount)}`}.`;
+      found = `They moved ${n(p.observed)}.`;
+  }
+  const home = p.vault === 'v2' ? ', less 1% for PINKY stakers' : '';
   switch (p.status) {
     case 'Kept':
-      return { badge: 'Kept', tone: 'kept', line: `${who} promised not to move ${limit}.`, note: 'Kept their word. The bond went home.' };
+      return { badge: 'Kept', tone: 'kept', line, note: `Kept their word. The bond went home${home}.` };
     case 'Broken':
-      return { badge: 'Broken', tone: 'broken', line: `${who} promised not to move ${limit}.`, note: `They moved ${amount(p.observedOut, p.decimals)} ${symbol}. The bond is gone.` };
+      return { badge: 'Broken', tone: 'broken', line, note: `${found} ${to ? `The bond goes to ${to}.` : 'The bond is gone.'}` };
     case 'Refunded':
-      return { badge: 'No answer', tone: 'quiet', line: `${who} promised not to move ${limit}.`, note: 'The oracle gave no answer, so the bond was returned.' };
+      return { badge: 'No answer', tone: 'quiet', line, note: 'The oracle gave no answer, so the bond was returned.' };
     case 'Asked':
-      return { badge: 'Counting', tone: 'waiting', line: `${who} promised not to move ${limit}.`, note: `${bond} on the line. The swarm is counting.` };
+      return p.failed
+        ? { badge: 'Ask again', tone: 'waiting', line, note: `${bond} on the line. The panel couldn't agree, so it will be asked again.` }
+        : { badge: 'Counting', tone: 'waiting', line, note: `${bond} on the line. The swarm is counting.` };
     case 'Closed':
-      return { badge: 'Closed', tone: 'waiting', line: `${who} promised not to move ${limit}.`, note: `${bond} on the line. Waiting for the oracle.` };
+      return { badge: 'Closed', tone: 'waiting', line, note: `${bond} on the line. Waiting for the oracle.` };
     default:
       return over
-        ? { badge: 'Time is up', tone: 'waiting', line: `${who} promised not to move ${limit}.`, note: `${bond} on the line. Waiting to be closed.` }
-        : { badge: 'Running', tone: 'waiting', line: `${who} won't move ${limit}.`, note: `${bond} on the line until ${until}.${p.cover ? ` ${p.cover}` : ''}` };
+        ? { badge: 'Time is up', tone: 'waiting', line, note: `${bond} on the line. Waiting to be closed.` }
+        : { badge: 'Running', tone: 'waiting', line, note: `${bond} on the line until ${until}.${to ? ` Made to ${to}.` : ''}${p.cover ? ` ${p.cover}` : ''}` };
   }
 }
 
@@ -180,12 +226,12 @@ p{position:absolute;left:82px;right:300px;bottom:112px;margin:0;font:600 32px/1.
 </style></head><body><div class="arc"></div>
 <div class="top">${MARK}<b>pinky</b></div><div class="badge">${esc(d.badge)}</div>
 <h1>${esc(d.line).replace(/^(0x\w{4}…\w{4})/, '<span>$1</span>')}</h1>
-<p>${esc(d.note)}</p><div class="foot">pinkybond.fun · promise #${p.id}</div>
+<p>${esc(d.note)}</p><div class="foot">pinkybond.fun · promise #${p.id}${p.vault === 'v1' ? ' · first vault' : ''}</div>
 </body></html>`;
 }
 
 function pageHtml(p, d, image) {
-  const url = `${SITE}/p/${p.id}/`;
+  const url = `${SITE}/p/${p.key}/`;
   const title = `${d.line} — Pinky`;
   const text = `${d.note} Promise #${p.id} on Pinky: a promise with money behind it.`;
   return `<!doctype html>
@@ -206,11 +252,11 @@ function pageHtml(p, d, image) {
 <meta name="twitter:card" content="summary_large_image">
 <meta name="theme-color" content="#5E1224">
 <link rel="icon" href="/mark.svg" type="image/svg+xml">
-<meta http-equiv="refresh" content="0; url=/#p${p.id}">
-<script>location.replace('/#p${p.id}');</script>
+<meta http-equiv="refresh" content="0; url=/#p${p.key}">
+<script>location.replace('/#p${p.key}');</script>
 </head>
 <body style="margin:0;background:#5E1224;color:#F4EEDD;font:18px system-ui,sans-serif">
-<p style="padding:24px"><a href="/#p${p.id}" style="color:#E79AA8">Open promise #${p.id} on Pinky</a></p>
+<p style="padding:24px"><a href="/#p${p.key}" style="color:#E79AA8">Open promise #${p.id} on Pinky</a></p>
 </body>
 </html>
 `;
@@ -242,11 +288,11 @@ async function main() {
   const now = Date.now() / 1000;
   for (const p of promises) {
     const d = describe(p, now);
-    const dir = join(OUT, String(p.id));
+    const dir = join(OUT, p.key);
     await mkdir(dir, { recursive: true });
     // The status is in the file name, so a preview cached as "Running" is not reused for "Kept".
     const image = `card-${d.badge.toLowerCase().replace(/[^a-z]+/g, '-')}.png`;
-    const card = join(tmp, `${p.id}.html`);
+    const card = join(tmp, `${p.key}.html`);
     await writeFile(card, cardHtml(p, d));
     execFileSync(chrome, [
       '--headless=new', '--no-sandbox', '--disable-gpu', '--hide-scrollbars', '--force-device-scale-factor=1',
@@ -255,7 +301,7 @@ async function main() {
     ], { stdio: 'ignore', timeout: 120_000 });
     if (!existsSync(join(dir, image))) throw new Error(`the browser drew nothing for promise #${p.id}`);
     await writeFile(join(dir, 'index.html'), pageHtml(p, d, image));
-    console.log(`  #${p.id} ${d.badge}: ${d.line}`);
+    console.log(`  ${p.key} ${d.badge}: ${d.line}`);
   }
   await rm(tmp, { recursive: true, force: true });
 }

@@ -3,8 +3,12 @@ import { config } from './config.js';
 
 const $ = (sel) => document.querySelector(sel);
 const STATUS = ['Active', 'Closed', 'Asked', 'Kept', 'Broken', 'Refunded'];
-const PAGE = 40;
-// The public node allows about one request every seven seconds per address.
+// The public node allows about one request every seven seconds per address, and since 2026-10-15
+// refuses a batch of more than about 55 calls with a 429 (whose CORS header is broken, so the
+// browser only sees a failed fetch). The board's read stays under 50: the newest PAGE promises of
+// the second vault and the first vault's few, which no longer takes new ones from this page.
+const PAGE = 28;
+const PAGE_V1 = 6;
 const NODE_GAP_MS = 7500;
 
 const vaultAbi = [
@@ -24,6 +28,37 @@ const vaultAbi = [
   { type: 'function', name: 'payout', stateMutability: 'nonpayable', inputs: [{ type: 'uint256' }], outputs: [] },
   { type: 'function', name: 'refund', stateMutability: 'nonpayable', inputs: [{ type: 'uint256' }], outputs: [] },
 ];
+// The second vault: the same life cycle, four kinds of promise, an optional beneficiary.
+const KINDS = ['Keep', 'Pay', 'Hold', 'Moves'];
+const vault2Abi = [
+  { type: 'function', name: 'count', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint256' }] },
+  { type: 'function', name: 'fees', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint256' }] },
+  { type: 'function', name: 'promises', stateMutability: 'view', inputs: [{ type: 'uint256' }], outputs: [
+    { name: 'maker', type: 'address' }, { name: 'token', type: 'address' }, { name: 'kind', type: 'uint8' },
+    { name: 'status', type: 'uint8' }, { name: 'attempts', type: 'uint8' }, { name: 'paid', type: 'bool' },
+    { name: 'amount', type: 'uint256' }, { name: 'target', type: 'address' }, { name: 'beneficiary', type: 'address' },
+    { name: 'bond', type: 'uint256' }, { name: 'startBlock', type: 'uint64' }, { name: 'endBlock', type: 'uint64' },
+    { name: 'endTime', type: 'uint64' }, { name: 'closedAt', type: 'uint64' }, { name: 'askedAt', type: 'uint64' },
+    { name: 'asker', type: 'address' }, { name: 'intake', type: 'address' }, { name: 'requestId', type: 'bytes32' },
+    { name: 'observed', type: 'uint256' }, { name: 'failed', type: 'bool' },
+  ] },
+  { type: 'function', name: 'make', stateMutability: 'nonpayable', inputs: [
+    { type: 'uint8' }, { type: 'address' }, { type: 'uint256' }, { type: 'address' }, { type: 'address' }, { type: 'uint256' }, { type: 'uint256' },
+  ], outputs: [{ type: 'uint256' }] },
+  { type: 'function', name: 'settle', stateMutability: 'nonpayable', inputs: [{ type: 'uint256' }], outputs: [{ type: 'bytes32' }] },
+  { type: 'function', name: 'ask', stateMutability: 'nonpayable', inputs: [{ type: 'uint256' }], outputs: [{ type: 'bytes32' }] },
+  { type: 'function', name: 'payout', stateMutability: 'nonpayable', inputs: [{ type: 'uint256' }], outputs: [] },
+  { type: 'function', name: 'refund', stateMutability: 'nonpayable', inputs: [{ type: 'uint256' }], outputs: [] },
+  { type: 'function', name: 'sendFees', stateMutability: 'nonpayable', inputs: [], outputs: [] },
+];
+const ZERO = '0x0000000000000000000000000000000000000000';
+// The second vault's timing, from the contract: anyone but the maker closes two minutes after the
+// deadline, an unanswered request may be asked again after a day, the bond comes back after a week.
+const CLOSE_GRACE = 120;
+const ANSWER_TIMEOUT = 86400;
+const REFUND_GRACE = 7 * 86400;
+const FEE_BPS = 100n;
+
 const erc20Abi = [
   { type: 'function', name: 'symbol', stateMutability: 'view', inputs: [], outputs: [{ type: 'string' }] },
   { type: 'function', name: 'decimals', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint8' }] },
@@ -50,6 +85,8 @@ const state = {
   account: null, promises: [], minBond: 5n * 10n ** 18n, preview: !config.vault,
   // The oracle's price for one question, in IMD wei. Read from the Intake with the board.
   fee: 5n * 10n ** 17n,
+  // The second vault's 1% fees, waiting to be sent to stakers.
+  fees: 0n,
   // For running promises: what the maker's wallet holds of the token (by promise id), and market
   // prices in dollars (by token address). Together they say how much the bond is worth next to
   // what it is guarding.
@@ -96,39 +133,68 @@ async function nodeBatch(calls) {
   return calls.map((c, i) => decode(c, out[i]));
 }
 
+/**
+ * Both vaults' promises in one shape. `key` names a promise across the two: the first vault's
+ * keep their plain numbers (so /p/2/ still means promise #2), the second vault's are `v2-1`, `v2-2`…
+ */
+function asPromise(vault, id, row) {
+  const abi = vault === 'v2' ? vault2Abi : vaultAbi;
+  const o = Object.fromEntries(abi.find((f) => f.name === 'promises').outputs.map((out, j) => [out.name, row[j]]));
+  if (vault === 'v2') return { ...o, key: `v2-${id}`, vault, id, kind: KINDS[o.kind] ?? 'Keep' };
+  return { ...o, key: String(id), vault, id, kind: 'Keep', amount: o.maxOut, observed: o.observedOut, target: ZERO, beneficiary: ZERO, failed: false };
+}
+
 async function readBoard() {
   const vault = { to: config.vault, abi: vaultAbi };
+  const vault2 = { to: config.vault2, abi: vault2Abi };
   const pool = { to: config.staking, abi: stakingAbi };
   const calls = [
     { ...vault, functionName: 'count' }, { ...vault, functionName: 'minBond' },
     { ...pool, functionName: 'totalStaked' }, { ...pool, functionName: 'rewardRate' }, { ...pool, functionName: 'periodFinish' },
+    { ...vault2, functionName: 'count' }, { ...vault2, functionName: 'fees' },
   ];
-  for (let id = 1; id <= PAGE; id++) calls.push({ ...vault, functionName: 'promises', args: [BigInt(id)] });
+  const head = calls.length;
+  for (let id = 1; id <= PAGE_V1; id++) calls.push({ ...vault, functionName: 'promises', args: [BigInt(id)] });
+  // The second vault's newest PAGE, from the count seen last time, with room for a few new ones.
+  const known = Number(state.count2 ?? loadCache('pinky.count2').n ?? 0);
+  const from = Math.max(1, known - PAGE + 4);
+  for (let id = from; id < from + PAGE; id++) calls.push({ ...vault2, functionName: 'promises', args: [BigInt(id)] });
   // Running promises seen last time: ask what their makers hold now, in the same request.
-  const watched = state.promises.filter((p) => STATUS[p.status] === 'Active');
+  const watched = state.promises.filter((p) => STATUS[p.status] === 'Active').slice(0, 8);
   for (const p of watched) calls.push({ to: p.token, abi: erc20Abi, functionName: 'balanceOf', args: [p.maker] });
   // What the oracle charges for one question right now. Last in the batch, so nothing above moves.
   calls.push({ to: config.intake, abi: intakeAbi, functionName: 'priceOf', args: [config.oracleAction, config.imd] });
   const out = await nodeBatch(calls);
-  const [count, minBond, totalStaked, rewardRate, periodFinish] = out;
-  const rows = out.slice(5, 5 + PAGE);
-  watched.forEach((p, i) => { const held = out[5 + PAGE + i]; if (held !== null) state.balances[p.id] = held; });
-  const fee = out[5 + PAGE + watched.length];
+  const [count, minBond, totalStaked, rewardRate, periodFinish, count2, fees] = out;
+  const rows = out.slice(head, head + PAGE_V1);
+  const rows2 = out.slice(head + PAGE_V1, head + PAGE_V1 + PAGE);
+  const tail = head + PAGE_V1 + PAGE;
+  watched.forEach((p, i) => { const held = out[tail + i]; if (held !== null) state.balances[p.key] = held; });
+  const fee = out[tail + watched.length];
   if (fee) state.fee = fee;
-  if (count === null) throw new Error('the vault did not answer');
+  if (count === null || count2 === null) throw new Error('the vault did not answer');
   if (minBond) state.minBond = minBond;
+  if (fees !== null) state.fees = fees;
   if (totalStaked !== null) state.pool = { totalStaked, rewardRate: rewardRate ?? 0n, periodFinish: Number(periodFinish ?? 0n) };
-  const keys = vaultAbi[2].outputs.map((o) => o.name);
-  state.promises = rows.slice(0, Number(count)).map((row, i) => row && { id: i + 1, ...Object.fromEntries(keys.map((k, j) => [k, row[j]])) }).filter(Boolean).reverse();
-  state.total = Number(count);
+  const n2 = Number(count2);
+  const first = rows.slice(0, Number(count)).map((row, i) => row && asPromise('v1', i + 1, row)).filter(Boolean);
+  const second = rows2.map((row, i) => row && from + i <= n2 && asPromise('v2', from + i, row)).filter(Boolean);
+  // Newest first: every promise in the second vault is newer than the first vault's.
+  state.promises = [...second.reverse(), ...first.reverse()];
+  state.total = Number(count) + n2;
+  state.count2 = n2;
+  try { localStorage.setItem('pinky.count2', JSON.stringify({ n: n2 })); } catch { /* private window */ }
+  // More new promises than the read had room for: look again soon, from the new count.
+  return n2 >= from + PAGE;
 }
 
 /** Second request: what the board cannot say by itself — token names, and when running promises began. */
 async function readExtras() {
-  const tokens = [...new Set(state.promises.map((p) => p.token.toLowerCase()))].filter((t) => !state.tokens[t]);
-  const running = state.promises.filter((p) => STATUS[p.status] === 'Active' && !state.starts[p.id]);
+  // At most 48 calls, under the node's batch limit; whatever does not fit comes on the next round.
+  const tokens = [...new Set(state.promises.map((p) => p.token.toLowerCase()))].filter((t) => !state.tokens[t]).slice(0, 16);
+  const running = state.promises.filter((p) => STATUS[p.status] === 'Active' && !state.starts[p.key]).slice(0, 8);
   // A promise seen for the first time has no balance yet; later ones ride along with the board.
-  const unsized = state.promises.filter((p) => STATUS[p.status] === 'Active' && state.balances[p.id] === undefined);
+  const unsized = state.promises.filter((p) => STATUS[p.status] === 'Active' && state.balances[p.key] === undefined).slice(0, 8);
   if (!tokens.length && !running.length && !unsized.length) return false;
   await new Promise((ok) => setTimeout(ok, NODE_GAP_MS));
   const calls = tokens.flatMap((to) => [{ to, abi: erc20Abi, functionName: 'symbol' }, { to, abi: erc20Abi, functionName: 'decimals' }]);
@@ -140,7 +206,7 @@ async function readExtras() {
   ]);
   unsized.forEach((p, i) => {
     const value = decode(held[i], out[calls.length + running.length + i]);
-    if (value !== null) state.balances[p.id] = value;
+    if (value !== null) state.balances[p.key] = value;
   });
   tokens.forEach((t, i) => {
     const decimals = decode(calls[2 * i + 1], out[2 * i + 1]);
@@ -148,7 +214,7 @@ async function readExtras() {
   });
   running.forEach((p, i) => {
     const block = out[calls.length + i];
-    if (block?.timestamp) state.starts[p.id] = Number(block.timestamp);
+    if (block?.timestamp) state.starts[p.key] = Number(block.timestamp);
   });
   localStorage.setItem('pinky.tokens', JSON.stringify(state.tokens));
   localStorage.setItem(`pinky.starts.${config.vault}`, JSON.stringify(state.starts));
@@ -182,12 +248,12 @@ async function fetchPrices(tokens) {
   return true;
 }
 
-/** How the bond compares with what the wallet could still move. Only for a running promise. */
+/** How the bond compares with what the wallet could still move. Only for a running Keep promise. */
 function cover(p) {
   const meta = state.tokens[p.token.toLowerCase()];
-  const held = state.balances[p.id];
-  if (STATUS[p.status] !== 'Active' || !meta || held === undefined) return '';
-  const atStake = held > p.maxOut ? held - p.maxOut : 0n;
+  const held = state.balances[p.key];
+  if (p.kind !== 'Keep' || STATUS[p.status] !== 'Active' || !meta || held === undefined) return '';
+  const atStake = held > p.amount ? held - p.amount : 0n;
   if (atStake === 0n) return "Right now this wallet holds no more than the limit, so there's nothing here to break.";
   const tokenUsd = state.prices[p.token.toLowerCase()];
   const imdUsd = state.prices[config.imd.toLowerCase()];
@@ -207,20 +273,20 @@ function previewData() {
   const now = Math.floor(Date.now() / 1000);
   const t = '0x00000000000000000000000000000000000a11ce';
   state.tokens[t] = { symbol: 'MEME', decimals: 18 };
-  const base = { token: t, attempts: 1, paid: false, asker: '0x0000000000000000000000000000000000000000', observedOut: 0n };
+  const base = { token: t, attempts: 1, paid: false, asker: ZERO, observed: 0n, vault: 'v2', kind: 'Keep', target: ZERO, beneficiary: ZERO, failed: false };
   const e18 = 10n ** 18n;
-  state.starts[4] = previewSince - 300;
-  state.balances[4] = 12000000n * e18;
+  state.starts['v2-4'] = previewSince - 300;
+  state.balances['v2-4'] = 12000000n * e18;
   state.prices = { [t]: 0.00002, [config.imd.toLowerCase()]: 8.5 };
   state.pool = { totalStaked: 31400000n * e18, rewardRate: 22n * e18 / 604800n, periodFinish: previewSince + 5 * 86400 };
   // The third example gets its verdict a few seconds in, so the preview shows a promise being kept.
   const counted = now - previewSince >= 12;
   state.promises = [
-    { ...base, id: 4, maker: '0x1111111111111111111111111111111111111111', maxOut: 0n, bond: 20n * e18, endTime: previewSince + 1500, status: 0, attempts: 0 },
-    { ...base, id: 3, maker: '0x2222222222222222222222222222222222222222', maxOut: 1000000n * e18, bond: 95n * e18 / 10n, endTime: previewSince - 300, status: counted ? 3 : 2 },
-    { ...base, id: 2, maker: '0x3333333333333333333333333333333333333333', maxOut: 0n, bond: 0n, endTime: now - 7200, status: 3, paid: true },
-    { ...base, id: 1, maker: '0x4444444444444444444444444444444444444444', maxOut: 5000000n * e18, bond: 0n, endTime: now - 90000, status: 4, paid: true, observedOut: 48000000n * e18 },
-  ];
+    { ...base, id: 4, maker: '0x1111111111111111111111111111111111111111', amount: 0n, bond: 20n * e18, endTime: previewSince + 1500, status: 0, attempts: 0 },
+    { ...base, id: 3, maker: '0x2222222222222222222222222222222222222222', kind: 'Pay', amount: 1000000n * e18, target: '0x5555555555555555555555555555555555555555', beneficiary: '0x5555555555555555555555555555555555555555', bond: 95n * e18 / 10n, endTime: previewSince - 300, status: counted ? 3 : 2 },
+    { ...base, id: 2, maker: '0x3333333333333333333333333333333333333333', amount: 0n, bond: 0n, endTime: now - 7200, status: 3, paid: true },
+    { ...base, id: 1, maker: '0x4444444444444444444444444444444444444444', amount: 5000000n * e18, bond: 0n, endTime: now - 90000, status: 4, paid: true, observed: 48000000n * e18 },
+  ].map((p) => ({ ...p, key: `v2-${p.id}` }));
   state.total = 4;
 }
 
@@ -264,27 +330,95 @@ function tick() {
   if (ended) render();
 }
 
+/** An amount of the promise's token. NFTs have no decimals: they are counted as they are. */
+function countOf(p, wei) {
+  const meta = state.tokens[p.token.toLowerCase()];
+  if (meta || (p.kind !== 'Hold' && p.kind !== 'Moves')) return amount(p, wei);
+  return BigInt(wei).toLocaleString('en-US');
+}
+const someone = (a) => `<span class="who">${link('address', a, short(a))}</span>`;
+const isMe = (a) => !!state.account && a.toLowerCase() === state.account.toLowerCase();
+
+/** The promise as one sentence, in the tense of where it stands. */
+function sayOf(p, over) {
+  const who = state.preview ? esc(short(p.maker)) : `<a href="#w${p.maker.toLowerCase()}" title="Every promise this wallet made">${esc(short(p.maker))}</a>`;
+  const symbol = state.tokens[p.token.toLowerCase()]?.symbol;
+  const lead = `<span class="who">${who}</span>`;
+  switch (p.kind) {
+    case 'Pay':
+      return `${lead} ${over ? 'promised to send' : 'will send'} at least ${countOf(p, p.amount)} to ${someone(p.target)}.`;
+    case 'Hold':
+      return `${lead} ${over ? 'promised to still hold' : 'will still hold'} at least ${countOf(p, p.amount)} at the deadline.`;
+    case 'Moves': {
+      const what = symbol ? esc(symbol) : 'these NFTs';
+      return `${lead} ${over ? 'promised not to move' : "won't move"} ${p.amount === 0n ? `a single one of ${what}` : `more than ${countOf(p, p.amount)} of ${what}`}.`;
+    }
+    default: {
+      const limit = p.amount === 0n ? 'a single token' : `more than ${amount(p, p.amount)}`;
+      const of = p.amount === 0n && symbol ? ` of ${esc(symbol)}` : '';
+      return `${lead} ${over ? 'promised not to move' : "won't move"} ${limit}${of}.`;
+    }
+  }
+}
+
+/** What the oracle found, for a broken promise. */
+function foundOf(p) {
+  switch (p.kind) {
+    case 'Pay': return p.observed === 0n ? 'They sent nothing.' : `They sent ${countOf(p, p.observed)}.`;
+    case 'Hold': return `At the deadline they held ${countOf(p, p.observed)}.`;
+    case 'Moves': return `They moved ${BigInt(p.observed).toLocaleString('en-US')} out.`;
+    default: return `They moved ${amount(p, p.observed)}.`;
+  }
+}
+
+/** Once the oracle has had its chances, or a week has passed since the close, the bond can go home. */
+function refundable(p, now) {
+  const status = STATUS[p.status];
+  if (status === 'Closed') return now >= Number(p.closedAt) + REFUND_GRACE;
+  if (status !== 'Asked' || now < Number(p.askedAt) + ANSWER_TIMEOUT) return false;
+  return p.attempts >= 3 || now >= Number(p.closedAt) + REFUND_GRACE;
+}
+
 function describe(p) {
   const now = Date.now() / 1000;
   const over = now >= Number(p.endTime);
-  const limit = p.maxOut === 0n ? 'a single token' : `more than ${amount(p, p.maxOut)}`;
-  const tokenName = state.tokens[p.token.toLowerCase()]?.symbol;
-  const of = p.maxOut === 0n && tokenName ? ` of ${esc(tokenName)}` : '';
-  const who = state.preview ? esc(short(p.maker)) : `<a href="#w${p.maker.toLowerCase()}" title="Every promise this wallet made">${esc(short(p.maker))}</a>`;
-  const say = `<span class="who">${who}</span> ${over ? 'promised not to move' : "won't move"} ${limit}${of}.`;
+  const say = sayOf(p, over);
+  const v2 = p.vault === 'v2';
+  const refund = refundable(p, now) ? ['refund', 'Return the bond'] : null;
   switch (STATUS[p.status]) {
-    case 'Active':
-      return over
-        ? { say, badge: ['waiting', 'Time is up'], note: 'Anyone can close it now.', action: ['close', 'Close it'] }
-        : { say, badge: ['waiting', 'Running'], note: `Ends in <b data-countdown="${Number(p.endTime)}"></b>.`, running: true };
+    case 'Active': {
+      if (!over) return { say, badge: ['waiting', 'Running'], note: `Ends in <b data-countdown="${Number(p.endTime)}"></b>.`, running: true };
+      if (!v2) return { say, badge: ['waiting', 'Time is up'], note: 'Anyone can close it now.', action: ['close', 'Close it'] };
+      // The second vault lets the maker close at the deadline, everyone else two minutes later.
+      const anyone = Number(p.endTime) + CLOSE_GRACE;
+      if (isMe(p.maker)) return { say, badge: ['waiting', 'Time is up'], note: 'Close it now: the count stops at the block it closes in.', action: ['settle', 'Close it'] };
+      if (now < anyone) return { say, badge: ['waiting', 'Time is up'], note: `The maker can close it now. Anyone can in <b data-countdown="${anyone}"></b>.` };
+      return { say, badge: ['waiting', 'Time is up'], note: 'Anyone can close it now.', action: ['settle', 'Close it'] };
+    }
     case 'Closed':
-      return { say, badge: ['waiting', 'Closed'], note: 'Ready for the oracle. Asking costs the bond 0.5 IMD.', action: ['ask', 'Ask the oracle'] };
-    case 'Asked':
+      return { say, badge: ['waiting', 'Closed'], note: `Ready for the oracle${v2 ? ' a few seconds after closing' : ''}. Asking costs the bond ${imd(state.fee)} IMD.`, action: refund ?? [v2 ? 'settle' : 'ask', 'Ask the oracle'] };
+    case 'Asked': {
+      const left = 3 - p.attempts;
+      if (refund) return { say, badge: ['quiet', 'No answer'], note: 'The oracle has had its chances. The bond can go home.', action: refund };
+      if (v2 && p.failed) {
+        return left > 0
+          ? { say, badge: ['waiting', 'Ask again'], note: `The panel couldn't settle on an answer. Anyone can ask again now, ${left} ${left === 1 ? 'try' : 'tries'} left.`, action: ['ask', 'Ask again'] }
+          : { say, badge: ['quiet', 'No answer'], note: 'The panel couldn\'t settle on an answer three times. The bond goes home a day after the last ask.' };
+      }
+      if (left > 0 && now >= Number(p.askedAt) + ANSWER_TIMEOUT) return { say, badge: ['waiting', 'Counting'], note: 'No answer for a day. Anyone can ask again.', action: ['ask', 'Ask again'] };
       return { say, badge: ['waiting', 'Counting'], note: `The swarm is counting<span class="dots" aria-hidden="true"><i></i><i></i><i></i></span> Attempt ${p.attempts} of 3.` };
-    case 'Kept':
-      return { say, badge: ['kept', 'Kept'], note: p.paid ? 'Kept their word. The bond went home.' : 'Kept their word. The bond is ready to go home.', action: p.paid ? null : ['payout', 'Send it home'] };
-    case 'Broken':
-      return { say, badge: ['broken', 'Broken'], note: `They moved ${amount(p, p.observedOut)}. ${p.paid ? 'The bond is gone.' : 'The bond is forfeit.'}`, action: p.paid ? null : ['payout', 'Split the bond'] };
+    }
+    case 'Kept': {
+      const less = v2 ? ', less 1% for PINKY stakers' : '';
+      return { say, badge: ['kept', 'Kept'], note: p.paid ? `Kept their word. The bond went home${less}.` : `Kept their word. The bond is ready to go home${less}.`, action: p.paid ? null : ['payout', 'Send it home'] };
+    }
+    case 'Broken': {
+      const to = p.beneficiary && p.beneficiary !== ZERO ? p.beneficiary : null;
+      const where = to
+        ? (p.paid ? `The bond went to ${someone(to)}.` : `The bond goes to ${someone(to)}.`)
+        : (p.paid ? 'The bond is gone.' : 'The bond is forfeit.');
+      return { say, badge: ['broken', 'Broken'], note: `${foundOf(p)} ${where}`, action: p.paid ? null : ['payout', to ? `Pay ${short(to)}` : 'Split the bond'] };
+    }
     default:
       return { say, badge: ['quiet', 'No answer'], note: 'The oracle gave no answer, so the bond was returned.' };
   }
@@ -297,7 +431,7 @@ function shareOnX(p, d) {
   const status = STATUS[p.status];
   const end = { Kept: ' Kept.', Broken: ' Broken.' }[status] ?? ` ${imd(p.bond)} IMD on it.`;
   const text = `${box.textContent}${end} Pinky promise.`;
-  return `https://x.com/intent/post?text=${encodeURIComponent(text)}&url=${encodeURIComponent(promiseUrl(p.id))}`;
+  return `https://x.com/intent/post?text=${encodeURIComponent(text)}&url=${encodeURIComponent(promiseUrl(p.key))}`;
 }
 
 /** #w0x… shows one wallet's promises: its record, kept and broken, in one line. */
@@ -336,26 +470,28 @@ function render() {
       const token = state.tokens[p.token.toLowerCase()];
       const status = STATUS[p.status];
       // A verdict that arrived since the last draw gets its moment once.
-      const before = state.seen.get(p.id);
+      const before = state.seen.get(p.key);
       if (before !== undefined && before !== status && (status === 'Kept' || status === 'Broken')) {
-        state.fresh.set(p.id, { cls: `just-${status.toLowerCase()}`, until: Date.now() + 3000 });
+        state.fresh.set(p.key, { cls: `just-${status.toLowerCase()}`, until: Date.now() + 3000 });
       }
-      state.seen.set(p.id, status);
-      const mark = state.fresh.get(p.id);
+      state.seen.set(p.key, status);
+      const mark = state.fresh.get(p.key);
       const fresh = mark && Date.now() < mark.until ? mark.cls : '';
-      const start = state.starts[p.id];
+      const start = state.starts[p.key];
+      const to = p.beneficiary && p.beneficiary !== ZERO ? p.beneficiary : null;
       const bar = d.running && start ? `<div class="term"><i data-term="${start},${Number(p.endTime)}"></i></div>` : '';
-      return `<article class="card ${fresh}${linkedId() === p.id ? ' linked' : ''}" id="p${p.id}">
-        <div class="card-head"><span class="badge ${d.badge[0]}">${d.badge[1]}</span><span class="id">#${p.id}</span><span class="shares"><button class="share" type="button" data-share="${p.id}">Copy link</button><a class="share" href="${shareOnX(p, d)}" target="_blank" rel="noopener">Share on X</a><button class="share" type="button" data-card="${p.id}" data-badge="${d.badge[1]}">Get card</button></span>${hooks(status === 'Broken' ? 'apart' : status === 'Refunded' ? 'idle' : '')}</div>
+      return `<article class="card ${fresh}${linkedId() === p.key ? ' linked' : ''}" id="p${p.key}">
+        <div class="card-head"><span class="badge ${d.badge[0]}">${d.badge[1]}</span><span class="id">#${p.id}${p.vault === 'v1' ? ' · first vault' : ''}</span><span class="shares"><button class="share" type="button" data-share="${p.key}">Copy link</button><a class="share" href="${shareOnX(p, d)}" target="_blank" rel="noopener">Share on X</a><button class="share" type="button" data-card="${p.key}" data-badge="${d.badge[1]}">Get card</button></span>${hooks(status === 'Broken' ? 'apart' : status === 'Refunded' ? 'idle' : '')}</div>
         <p class="say">${d.say}</p>
         ${bar}
         <div class="meta">
           <span>Token <b>${link('address', p.token, token?.symbol || short(p.token))}</b></span>
           <span>Bond <b>${imd(p.bond)} IMD</b></span>
           <span>Deadline <b>${new Date(Number(p.endTime) * 1000).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })}</b></span>
+          ${to ? `<span>If broken, to <b>${link('address', to, short(to))}</b></span>` : ''}
         </div>
         ${cover(p) ? `<p class="cover">${cover(p)}</p>` : ''}
-        <div class="actions"><span class="fine">${d.note}</span>${d.action ? `<button class="btn small light" data-act="${d.action[0]}" data-id="${p.id}">${d.action[1]}</button>` : ''}</div>
+        <div class="actions"><span class="fine">${d.note}</span>${d.action ? `<button class="btn small light" data-act="${d.action[0]}" data-key="${p.key}">${d.action[1]}</button>` : ''}</div>
       </article>`;
     }).join('');
   }
@@ -378,10 +514,13 @@ function render() {
 const whole = (wei) => Number(formatUnits(wei, 18)).toLocaleString('en-US', { maximumFractionDigits: 0 });
 const fine = (wei) => Number(formatUnits(wei, 18)).toLocaleString('en-US', { maximumFractionDigits: 4 });
 
-/** A promise of the connected wallet about PINKY that is still running: staking would break it. */
+/**
+ * A running promise of the connected wallet that staking PINKY would break: one that PINKY may not
+ * leave the wallet under, or must still be there at the end. A promise to pay is not one of them.
+ */
 function runningPinkyPromise() {
   if (!state.account || !config.token) return null;
-  return state.promises.find((p) => STATUS[p.status] === 'Active'
+  return state.promises.find((p) => STATUS[p.status] === 'Active' && p.kind !== 'Pay'
     && p.maker.toLowerCase() === state.account.toLowerCase() && p.token.toLowerCase() === config.token.toLowerCase()) ?? null;
 }
 
@@ -395,11 +534,16 @@ function renderPool() {
   const mine = state.mine;
   $('#myStake').textContent = mine ? `${whole(mine.staked)} PINKY` : '—';
   $('#myEarned').textContent = mine ? `${fine(mine.earned)} IMD` : '—';
+  // The 1% the second vault keeps from settled bonds, until someone sends it on to the pool.
+  $('#feesLine').hidden = !state.fees;
+  $('#feesWaiting').textContent = `${fine(state.fees)} IMD`;
   $('#poolHint').textContent = !state.account ? 'Connect a wallet to see your stake.'
     : mine ? `You have ${whole(mine.wallet)} PINKY in your wallet.` : '';
   const blocked = runningPinkyPromise();
   $('#stakeWarn').hidden = !blocked;
-  if (blocked) $('#stakeWarn').textContent = `Hold on: promise #${blocked.id} says you won't move PINKY, and staking moves it out of your wallet. Stake now and you break it. Wait until it's closed.`;
+  if (blocked) $('#stakeWarn').textContent = blocked.kind === 'Hold'
+    ? `Hold on: promise #${blocked.id} says you'll still hold PINKY at the deadline, and staking takes it out of your wallet. Wait until it's closed.`
+    : `Hold on: promise #${blocked.id} says you won't move PINKY, and staking moves it out of your wallet. Stake now and you break it. Wait until it's closed.`;
   $('#stakeBtn').disabled = !!blocked;
   $('#claimBtn').disabled = !mine || mine.earned === 0n;
   $('#unstakeBtn').disabled = !!mine && mine.staked === 0n;
@@ -423,7 +567,8 @@ async function refresh() {
   if (reading) return;
   reading = true;
   try {
-    if (state.preview) previewData(); else await readBoard();
+    const more = state.preview ? (previewData(), false) : await readBoard();
+    if (more) setTimeout(refresh, 2 * NODE_GAP_MS);
     render();
     if (!state.preview && await readExtras()) render();
     if (!state.preview && await readPrices().catch(() => false)) render();
@@ -516,10 +661,10 @@ function onAccounts(accounts) {
   state.account = accounts[0] ? getAddress(accounts[0]) : null;
   state.mine = null;
   $('#connect').textContent = state.account ? short(state.account) : 'Connect wallet';
-  // The form's preview is about this wallet's holdings: look again.
+  // The form's preview is about this wallet's holdings: look again. The board too, since a maker
+  // may close their own promise before anyone else.
   lookUpToken(true);
-  renderSum();
-  renderPool();
+  render();
   readMine().catch(() => {});
 }
 
@@ -599,11 +744,12 @@ $('#connect').onclick = () => connect().catch((e) => {
 });
 
 // A promise has its own address. /p/2/ is a small page with that promise's link preview, built by
-// tools/build-previews.mjs; it sends people on to /#p2, which opens the board at that card.
-const promiseUrl = (id) => `${location.origin}/p/${id}/`;
+// tools/build-previews.mjs; it sends people on to /#p2, which opens the board at that card. The
+// second vault's promises are /p/v2-1/ and /#pv2-1.
+const promiseUrl = (key) => `${location.origin}/p/${key}/`;
 function linkedId() {
-  const m = /^#p(\d+)$/.exec(location.hash);
-  return m ? Number(m[1]) : null;
+  const m = /^#p((?:v2-)?\d+)$/.exec(location.hash);
+  return m ? m[1] : null;
 }
 let shownLinked = null;
 function showLinked() {
@@ -654,18 +800,23 @@ $('#cards').addEventListener('click', async (ev) => {
   const btn = ev.target.closest('button[data-act]');
   if (!btn) return;
   if (state.preview) { btn.textContent = 'Preview only'; return; }
+  const p = state.promises.find((x) => x.key === btn.dataset.key);
+  if (!p) return;
   const label = btn.textContent;
   btn.disabled = true;
   try {
     if (!state.account) await connect();
     btn.textContent = 'Confirm in your wallet…';
-    await send(config.vault, vaultAbi, btn.dataset.act, [BigInt(btn.dataset.id)]);
+    const [to, abi] = p.vault === 'v2' ? [config.vault2, vault2Abi] : [config.vault, vaultAbi];
+    await send(to, abi, btn.dataset.act, [BigInt(p.id)]);
     btn.textContent = 'Done';
     setTimeout(refresh, NODE_GAP_MS);
   } catch (e) {
     btn.disabled = false;
     btn.textContent = label;
-    btn.parentElement.querySelector('.fine').textContent = readable(e);
+    // The oracle wants the closing block confirmed: an ask right after the close is refused.
+    const soon = STATUS[p.status] === 'Closed' ? ' If it closed a moment ago, wait a few seconds and try again.' : '';
+    btn.parentElement.querySelector('.fine').textContent = readable(e) + soon;
   }
 });
 
@@ -674,35 +825,52 @@ $('#form').addEventListener('submit', async (ev) => {
   const msg = (text, bad = false) => { $('#formMsg').textContent = text; $('#formMsg').className = bad ? 'msg bad' : 'msg'; };
   if (state.preview) return msg('The contracts are not live yet, so this form is switched off.', true);
   const f = ev.target.elements;
+  const kind = formKind();
   const token = f.token.value.trim();
   if (!isAddress(token)) return msg("That doesn't look like a token address.", true);
+  // The bond itself leaves the wallet in IMD, inside the window, so the vault refuses this one.
+  if (kind === 'Keep' && token.toLowerCase() === config.imd.toLowerCase()) return msg("A promise not to move IMD can't be judged: the bond itself leaves your wallet in IMD.", true);
+  const target = f.target.value.trim();
+  if (kind === 'Pay' && !isAddress(target)) return msg("Say who you'll pay: their address.", true);
+  const named = f.beneficiary.value.trim();
+  if (named && !isAddress(named)) return msg("The address the bond would go to doesn't look right.", true);
   const seconds = Math.round(Number(f.duration.value) * Number(f.unit.value));
   if (!(seconds >= 600 && seconds <= 2592000)) return msg('Pick a term between 10 minutes and 30 days.', true);
   $('#submit').disabled = true;
   try {
     if (!state.account) await connect();
-    // An ordinary token says how many decimals it has; an NFT does not. The vault's question to
-    // the oracle sums transfer amounts, which NFTs do not have, so a promise about one would be
-    // judged on nothing.
+    const me = state.account.toLowerCase();
+    if (kind === 'Pay' && target.toLowerCase() === me) throw new Error("Paying yourself doesn't prove anything. Name someone else.");
+    // A promise to pay someone is made to them, unless the form names someone else.
+    const beneficiary = named ? getAddress(named) : kind === 'Pay' ? getAddress(target) : ZERO;
+    if (beneficiary.toLowerCase() === me) throw new Error("The bond can't go to you if you break your word. Name someone else, or leave it empty.");
+    // An ordinary token says how many decimals it has; an NFT does not. Both questions the form
+    // asks sum transfer amounts, which NFTs do not have, so a promise about one would be judged
+    // on nothing.
     let decimals;
     try {
       decimals = Number(await walletCall(token, erc20Abi, 'decimals'));
     } catch {
-      throw new Error("That address isn't an ordinary token. NFTs aren't supported yet.");
+      throw new Error("That address isn't an ordinary token. NFTs come soon.");
     }
-    const maxOut = parseUnits(f.maxOut.value.trim() || '0', decimals);
+    const amount = parseUnits(f.maxOut.value.trim() || '0', decimals);
+    if (kind === 'Pay' && amount === 0n) throw new Error('Say how much you\'ll send.');
     const bond = parseUnits(f.bond.value.trim(), 18);
     if (bond < state.minBond) throw new Error(`The bond has to be at least ${imd(state.minBond)} IMD.`);
-    const allowed = await walletCall(config.imd, erc20Abi, 'allowance', [state.account, config.vault]);
+    const allowed = await walletCall(config.imd, erc20Abi, 'allowance', [state.account, config.vault2]);
     if (allowed < bond) {
       msg('Step 1 of 2: let the vault take the bond. Confirm in your wallet…');
-      await send(config.imd, erc20Abi, 'approve', [config.vault, bond]);
+      await send(config.imd, erc20Abi, 'approve', [config.vault2, bond]);
     }
     msg('Step 2 of 2: make the promise. Confirm in your wallet…');
-    await send(config.vault, vaultAbi, 'make', [getAddress(token), maxOut, BigInt(seconds), bond]);
+    await send(config.vault2, vault2Abi, 'make', [
+      KINDS.indexOf(kind), getAddress(token), amount, kind === 'Pay' ? getAddress(target) : ZERO, beneficiary, BigInt(seconds), bond,
+    ]);
     msg("It's on the board. Now keep it.");
     squeeze();
     ev.target.reset();
+    $('#toSomeone').open = false;
+    onKind();
     lookUpToken(true);
     renderSum();
     setTimeout(refresh, NODE_GAP_MS);
@@ -754,6 +922,23 @@ async function poolAction(kind) {
   }
 }
 for (const kind of ['stake', 'unstake', 'claim']) $(`#${kind}Btn`).onclick = () => poolAction(kind);
+$('#sendFees').onclick = async () => {
+  const btn = $('#sendFees');
+  try {
+    if (!state.account) await connect();
+    btn.disabled = true;
+    btn.textContent = 'Confirm in your wallet…';
+    await send(config.vault2, vault2Abi, 'sendFees', []);
+    btn.textContent = 'Sent';
+    setTimeout(refresh, NODE_GAP_MS);
+  } catch (e) {
+    btn.textContent = 'Send them to stakers';
+    $('#poolMsg').textContent = readable(e);
+    $('#poolMsg').className = 'msg bad';
+  } finally {
+    btn.disabled = false;
+  }
+};
 
 // What the form knows about the token being typed: its name and decimals, and, with a wallet
 // connected, how much of it that wallet holds.
@@ -794,6 +979,37 @@ function lookUpToken(force = false) {
   }, 600);
 }
 
+/** Which kind of promise the form is making: Keep or Pay for now. */
+const formKind = () => KINDS[Number($('#form').elements.kind.value)] ?? 'Keep';
+
+/** The form's words follow the kind: what the token is for, and what the amount means. */
+function onKind() {
+  const f = $('#form').elements;
+  const pay = formKind() === 'Pay';
+  $('#tokenLabel').textContent = pay ? "Token you'll send" : "Token you won't move";
+  $('#amountLabel').textContent = pay ? 'At least this many to them' : 'At most this many tokens out';
+  $('#toField').hidden = !pay;
+  f.target.required = pay;
+  // "None out" is the usual promise to keep; a payment starts from nothing.
+  if (pay && f.maxOut.value === '0') f.maxOut.value = '';
+  if (!pay && f.maxOut.value === '') f.maxOut.value = '0';
+  f.maxOut.placeholder = pay ? '1000' : '0';
+  f.beneficiary.placeholder = pay ? 'Empty: the person you pay' : '0x…';
+  $('#toSomeoneHint').textContent = pay
+    ? "Leave it empty and the bond goes to the person you pay if you don't."
+    : 'Leave it empty and a broken bond is split: a tenth to whoever asks first, the rest between PINKY stakers and a burn.';
+  renderSum();
+}
+
+/** Who a broken promise would pay, as the form stands: a typed address, or for Pay the payee. */
+function formBeneficiary() {
+  const f = $('#form').elements;
+  const named = f.beneficiary.value.trim();
+  if (isAddress(named)) return named;
+  if (formKind() === 'Pay' && isAddress(f.target.value.trim())) return f.target.value.trim();
+  return null;
+}
+
 /**
  * Under the bond field: the promise in words, what is locked and what comes back, and how the
  * bond compares with what the wallet holds — the same sentence the board will show.
@@ -801,21 +1017,28 @@ function lookUpToken(force = false) {
 function renderSum() {
   const box = $('#formSum');
   const f = $('#form').elements;
+  const kind = formKind();
   const least = state.minBond > state.fee * 3n ? state.minBond : state.fee * 3n;
   const bond = parseAmount(f.bond.value, 18);
+  const to = formBeneficiary();
   const lines = [];
+  const count = (wei) => Number(formatUnits(wei, draft.meta.decimals)).toLocaleString('en-US', { maximumFractionDigits: 2 });
+  const tokens = (wei) => `${count(wei)} ${esc(draft.meta.symbol || 'tokens')}`;
 
   if (draft.bad) {
-    lines.push("That address isn't an ordinary token. NFTs aren't supported yet.");
+    lines.push("That address isn't an ordinary token. NFTs come soon.");
   } else if (draft.meta) {
-    const symbol = esc(draft.meta.symbol || 'tokens');
-    const maxOut = parseAmount(f.maxOut.value || '0', draft.meta.decimals);
+    const amount = parseAmount(f.maxOut.value || '0', draft.meta.decimals);
     const n = Number(f.duration.value);
     const unit = { 60: 'minute', 3600: 'hour', 86400: 'day' }[f.unit.value];
-    const term = n > 0 && unit ? ` for ${n.toLocaleString('en-US')} ${unit}${n === 1 ? '' : 's'}` : '';
-    if (maxOut !== null) {
-      const limit = maxOut === 0n ? `a single ${symbol}` : `more than ${Number(formatUnits(maxOut, draft.meta.decimals)).toLocaleString('en-US', { maximumFractionDigits: 2 })} ${symbol}`;
-      lines.push(`<span class="sum-say">“I won't move ${limit}${term}.”</span>`);
+    const span = n > 0 && unit ? `${n.toLocaleString('en-US')} ${unit}${n === 1 ? '' : 's'}` : '';
+    const target = f.target.value.trim();
+    if (kind === 'Pay' && amount) {
+      const whom = isAddress(target) ? short(target) : 'them';
+      lines.push(`<span class="sum-say">“I'll send at least ${tokens(amount)} to ${esc(whom)}${span ? ` within ${span}` : ''}.”</span>`);
+    } else if (kind === 'Keep' && amount !== null) {
+      const limit = amount === 0n ? `a single ${esc(draft.meta.symbol || 'token')}` : `more than ${tokens(amount)}`;
+      lines.push(`<span class="sum-say">“I won't move ${limit}${span ? ` for ${span}` : ''}.”</span>`);
     }
   }
 
@@ -824,29 +1047,36 @@ function renderSum() {
   } else if (bond < least) {
     lines.push(`That's under the smallest bond, <b>${imd(least)} IMD</b>.`);
   } else {
-    lines.push(`You lock <b>${imd(bond)} IMD</b>; the oracle's question takes <b>${imd(state.fee)}</b> of it. Keep your word and <b>${imd(bond - state.fee)} IMD</b> comes home. Break it and none does.`);
+    // The second vault takes 1% of a bond that goes home or to the person it was made to.
+    const left = bond - state.fee;
+    const home = left - left * FEE_BPS / 10_000n;
+    const broken = to ? `Break it and <b>${imd(home)} IMD</b> goes to ${esc(short(to))}.` : 'Break it and none comes back.';
+    lines.push(`You lock <b>${imd(bond)} IMD</b>; the oracle's question takes <b>${imd(state.fee)}</b> of it. Keep your word and <b>${imd(home)} IMD</b> comes home, after 1% for PINKY stakers. ${broken}`);
   }
 
   if (draft.meta && !draft.bad) {
-    const maxOut = parseAmount(f.maxOut.value || '0', draft.meta.decimals) ?? 0n;
+    const amount = parseAmount(f.maxOut.value || '0', draft.meta.decimals) ?? 0n;
     if (!state.account) {
-      lines.push('Connect a wallet to see how the bond compares with what you hold.');
+      lines.push(kind === 'Pay' ? 'Connect a wallet to see whether you hold enough to pay.' : 'Connect a wallet to see how the bond compares with what you hold.');
+    } else if (draft.held !== null && kind === 'Pay') {
+      if (amount > 0n && draft.held < amount) lines.push(`<b>Your wallet holds ${tokens(draft.held)}</b> right now. You'll need ${tokens(amount)} by the deadline.`);
     } else if (draft.held !== null) {
-      const atStake = draft.held > maxOut ? draft.held - maxOut : 0n;
+      const atStake = draft.held > amount ? draft.held - amount : 0n;
       const tokenUsd = state.prices[draft.token];
       const imdUsd = state.prices[config.imd.toLowerCase()];
-      const shown = `${Number(formatUnits(atStake, draft.meta.decimals)).toLocaleString('en-US', { maximumFractionDigits: 2 })} ${esc(draft.meta.symbol || 'tokens')}`;
+      const shown = tokens(atStake);
       if (atStake === 0n) {
         lines.push(draft.held === 0n
-          ? `<b>Your wallet holds none of this token</b>, so the promise would have nothing to break.`
-          : `<b>Your wallet holds no more than the limit</b>, so the promise would have nothing to break.`);
+          ? '<b>Your wallet holds none of this token</b>, so the promise would have nothing to break.'
+          : '<b>Your wallet holds no more than the limit</b>, so the promise would have nothing to break.');
       } else if (bond && bond >= least && tokenUsd && imdUsd) {
         const stakeUsd = Number(formatUnits(atStake, draft.meta.decimals)) * tokenUsd;
         const share = (Number(formatUnits(bond, 18)) * imdUsd) / stakeUsd;
         const dollars = stakeUsd.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: stakeUsd < 100 ? 2 : 0 });
+        const pct = share < 0.01 ? 'less than 1%' : `${Math.round(share * 100)}%`;
         lines.push(share >= 1
           ? `The bond is worth <b>more than</b> the ${shown} you could move, about ${dollars}.`
-          : `The bond is worth <b>${share < 0.01 ? 'less than 1%' : `${Math.round(share * 100)}%`}</b> of the ${shown} you could move, about ${dollars}. The board will say so.`);
+          : `The bond is worth <b>${pct}</b> of the ${shown} you could move, about ${dollars}. The board will say so.`);
       } else if (!tokenUsd) {
         lines.push(`You could move ${shown}. There's no market price for it, so the board can't weigh the bond against that.`);
       }
@@ -855,7 +1085,8 @@ function renderSum() {
   box.innerHTML = lines.map((l) => `<p>${l}</p>`).join('');
 }
 
-for (const name of ['bond', 'maxOut', 'duration', 'unit']) $('#form').elements[name].addEventListener('input', renderSum);
+for (const name of ['bond', 'maxOut', 'duration', 'unit', 'target', 'beneficiary']) $('#form').elements[name].addEventListener('input', renderSum);
+for (const radio of $('#form').elements.kind) radio.addEventListener('change', onKind);
 $('#form').elements.token.addEventListener('input', () => { lookUpToken(); renderSum(); });
 
 // Where to get the token, and its address to check against whatever the swap page shows.
@@ -883,7 +1114,7 @@ if (state.preview) {
   $('#notice').hidden = false;
   $('#notice').textContent = 'Preview. The contracts are being launched; the promises below are examples, not real ones.';
 }
-const rows = [['Vault', config.vault], ['Staking', config.staking], ['PINKY', config.token], ['IMD', config.imd]].filter(([, a]) => a);
+const rows = [['Vault', config.vault2], ['First vault', config.vault], ['Staking', config.staking], ['PINKY', config.token], ['IMD', config.imd]].filter(([, a]) => a);
 $('#addresses').innerHTML = rows.map(([k, a]) => `<dt>${k}</dt><dd><a href="${config.explorer}/address/${a}" target="_blank" rel="noopener">${a}</a></dd>`).join('');
 $('#gh').href = config.github;
 if (config.x) {
