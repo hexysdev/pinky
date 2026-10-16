@@ -252,3 +252,4 @@ h3 { font: 700 18px/1.3 var(--sans); margin: 0 0 4px; }
 .to-someone[open] summary { margin-bottom: 8px; }
 .to-someone .fine { margin-top: 6px; }
 #feesLine .share { margin-left: 4px; }
+.nowrap, .card .who { white-space: nowrap; }

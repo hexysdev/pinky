@@ -1035,7 +1035,7 @@ function renderSum() {
     const target = f.target.value.trim();
     if (kind === 'Pay' && amount) {
       const whom = isAddress(target) ? short(target) : 'them';
-      lines.push(`<span class="sum-say">“I'll send at least ${tokens(amount)} to ${esc(whom)}${span ? ` within ${span}` : ''}.”</span>`);
+      lines.push(`<span class="sum-say">“I'll send at least ${tokens(amount)} to <span class="nowrap">${esc(whom)}</span>${span ? ` within ${span}` : ''}.”</span>`);
     } else if (kind === 'Keep' && amount !== null) {
       const limit = amount === 0n ? `a single ${esc(draft.meta.symbol || 'token')}` : `more than ${tokens(amount)}`;
       lines.push(`<span class="sum-say">“I won't move ${limit}${span ? ` for ${span}` : ''}.”</span>`);
@@ -1050,7 +1050,7 @@ function renderSum() {
     // The second vault takes 1% of a bond that goes home or to the person it was made to.
     const left = bond - state.fee;
     const home = left - left * FEE_BPS / 10_000n;
-    const broken = to ? `Break it and <b>${imd(home)} IMD</b> goes to ${esc(short(to))}.` : 'Break it and none comes back.';
+    const broken = to ? `Break it and <b>${imd(home)} IMD</b> goes to <span class="nowrap">${esc(short(to))}</span>.` : 'Break it and none comes back.';
     lines.push(`You lock <b>${imd(bond)} IMD</b>; the oracle's question takes <b>${imd(state.fee)}</b> of it. Keep your word and <b>${imd(home)} IMD</b> comes home, after 1% for PINKY stakers. ${broken}`);
   }
 
