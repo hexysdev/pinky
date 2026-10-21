@@ -3,31 +3,47 @@
 A promise with money behind it.
 
 Anyone can say they won't sell. Pinky lets them prove it. A holder — a deployer, a whale, someone
-paid in tokens to promote them — locks IMD behind a promise: *"my wallet will not move more than
-`maxOut` of this token before the deadline."* When
-time is up, the contract buys one answer from the IdentityMD oracle out of the bond — the sum of
-the wallet's outgoing `Transfer` values over the exact block range — and that answer decides
-where the bond goes. Keep your word and the IMD comes home. Break it and it doesn't.
+paid in tokens to promote them — locks IMD behind one sentence about their own wallet:
+*"I won't move more than N of this token"* or *"I'll send at least N of it to this address"*,
+before a deadline, and can make the promise to someone. When time is up, the contract buys one
+answer from the IdentityMD oracle out of the bond — the sum of the wallet's `Transfer` events
+over the exact block range — and that answer decides where the bond goes. Keep your word and the
+IMD comes home, less 1% for PINKY stakers. Break it and it goes to the person you named, or to a
+watcher, PINKY stakers and a burn.
 
-Live on Robinhood Chain since 2026-10-09 — [pinkybond.fun](https://pinkybond.fun).
+Live on Robinhood Chain — [pinkybond.fun](https://pinkybond.fun). Two launches through the
+IdentityMD swarm:
 
-| | |
-|---|---|
-| PinkyVault | [`0x3c81384aa1ca064316576a214e2fb30969992772`](https://robinhoodchain.blockscout.com/address/0x3c81384aa1ca064316576a214e2fb30969992772) |
-| PinkyStaking | [`0x17fb2067652bcf4803e937cf323a248ff6b7cba3`](https://robinhoodchain.blockscout.com/address/0x17fb2067652bcf4803e937cf323a248ff6b7cba3) |
-| PINKY | [`0xb125c461c00863aacad4cc99311d2f23d4342a6f`](https://robinhoodchain.blockscout.com/address/0xb125c461c00863aacad4cc99311d2f23d4342a6f) |
-| Owner | `0x89d6584e733ece619c9c34f9a370e1dff5ecf8ef` |
-| IMD launch | #1166, [source as deployed](https://github.com/identity-md-launches/launch-1166-pinkystaking-pinkyvault) |
+| | | |
+|---|---|---|
+| PinkyVaultV2 | [`0x35fc6223307b55814a1a7a1b07c9c00d88e2b55c`](https://robinhoodchain.blockscout.com/address/0x35fc6223307b55814a1a7a1b07c9c00d88e2b55c) | launch #1840, 2026-10-15, [source as deployed](https://github.com/identity-md-launches/launch-1840-pinkyvaultv2) |
+| PinkyVault | [`0x3c81384aa1ca064316576a214e2fb30969992772`](https://robinhoodchain.blockscout.com/address/0x3c81384aa1ca064316576a214e2fb30969992772) | launch #1166, 2026-10-09, [source as deployed](https://github.com/identity-md-launches/launch-1166-pinkystaking-pinkyvault) |
+| PinkyStaking | [`0x17fb2067652bcf4803e937cf323a248ff6b7cba3`](https://robinhoodchain.blockscout.com/address/0x17fb2067652bcf4803e937cf323a248ff6b7cba3) | launch #1166 |
+| PINKY | [`0xb125c461c00863aacad4cc99311d2f23d4342a6f`](https://robinhoodchain.blockscout.com/address/0xb125c461c00863aacad4cc99311d2f23d4342a6f) | launch #1166, paired with IMD |
+| Owner | `0x89d6584e733ece619c9c34f9a370e1dff5ecf8ef` | |
 
-All three contracts are verified on Sourcify, creation and runtime bytecode both an exact match:
-[vault](https://repo.sourcify.dev/4663/0x3c81384aa1ca064316576a214e2fb30969992772),
+All four contracts are verified on Sourcify:
+[second vault](https://repo.sourcify.dev/4663/0x35fc6223307b55814a1a7a1b07c9c00d88e2b55c),
+[first vault](https://repo.sourcify.dev/4663/0x3c81384aa1ca064316576a214e2fb30969992772),
 [staking](https://repo.sourcify.dev/4663/0x17fb2067652bcf4803e937cf323a248ff6b7cba3),
 [token](https://repo.sourcify.dev/4663/0xb125c461c00863aacad4cc99311d2f23d4342a6f).
 
-The sources here are the ones deployed. They came out of the IdentityMD swarm's audit of this
+The sources here are the ones deployed. Both came out of the IdentityMD swarm's audit of this
 repository: an imported-code audit, four specialist audits and a judge, whose findings are fixed
-and listed in `ADAPTATION.md`. 137 Foundry tests pass (unit, fuzz, invariant and the protocol's
+and listed in `ADAPTATION.md`. 249 Foundry tests pass (unit, fuzz, invariant and the protocol's
 oracle conformance vector). No third-party audit.
+
+### Settled on chain
+
+| Promise | What it said | Oracle answer | Verdict |
+|---|---|---|---|
+| [First vault #1](https://pinkybond.fun/p/1/), 2026-10-09 | not a single PINKY out of the team wallet for 10 minutes | 0, in 11 min | Kept |
+| [First vault #2](https://pinkybond.fun/p/2/), 2026-10-11 | not a single PINKY out for a day: 921,335 blocks | 0, in 92 s | Kept |
+| [Second vault #1](https://pinkybond.fun/p/v2-1/), 2026-10-18 | at least 1 PINKY to `0x5f94…8eb7` within 15 minutes | 1 PINKY, in 65 s | Kept, 1% to stakers |
+
+The second vault's first fee, 0.045 IMD, has been sent to PinkyStaking and is streaming to stakers.
+"Will hold" and NFT promises are built and tested in the second vault and switch on once the oracle
+has answered one of each for real.
 
 ## How it works
 
