@@ -45,6 +45,32 @@ The second vault's first fee, 0.045 IMD, has been sent to PinkyStaking and is st
 "Will hold" and NFT promises are built and tested in the second vault and switch on once the oracle
 has answered one of each for real.
 
+## Who holds the keys
+
+Both vaults have one owner, fixed at deployment and never transferable:
+`0x89d6584e733ece619c9c34f9a370e1dff5ecf8ef`, a plain wallet (no code) held by the Pinky team. It is
+also the team wallet the promises above were made from and the hackathon prize wallet. The token and
+PinkyStaking have no owner at all.
+
+| | First vault | Second vault |
+|---|---|---|
+| Owner can change | Intake and action (`setProtocol`), oracle signer (`setSigner`), panel size, quorum and answer lifetime (`setPanel`) | The same, plus where the 1% fee goes (`proposeFeeSink`) |
+| How fast | At once | Proposed in a public `Proposed` event; anyone can `enact` it seven days later; the owner can `cancel` it before then |
+| Never changes | IMD, PinkyStaking, the minimum bond of 5 IMD, the owner | The same |
+| Owner cannot | Take a bond, change a promise's terms, or move IMD outside the payout rules | The same |
+| Worst case | A signer of the owner's own could sign false verdicts for any promise not yet settled, deciding where its bond goes; an Intake of the owner's own could take up to three oracle fees per promise, never more per request than the price quoted at `make` | The same, but only after seven days' public notice, and only for promises still open by then. A new fee sink receives only the 1% fee |
+
+State on 2026-10-27: both vaults use the IdentityMD oracle signer
+`0x5598aa9146215bc13eb26f2c692ad1461fd32982`, a panel of seven with a quorum of five, and the
+second vault's fee goes to PinkyStaking; the second vault has no pending proposal. Anyone can check
+this with `oracleSigner()`, `panelSize()`, `quorum()`, `feeSink()` and `pending(0…3)`.
+
+The first vault's settings change at once, so whoever bonds there trusts the owner not to swap the
+signer during the term. That is why new promises go to the second vault: a promise of up to seven
+days, made while nothing is pending, can be settled under the settings it was made with, and a longer one gets a week's public notice
+of any change, though no way out. The owner role exists because the IdentityMD signer
+or Intake can rotate; without it, a rotation would strand every open bond until its refund.
+
 ## How it works
 
 1. **make** — the holder calls `PinkyVault.make(token, maxOut, duration, bond)`. The vault
@@ -175,7 +201,8 @@ v5.5.0, forge-std v1.9.7); nothing is downloaded at build time.
   verdicts. The owner cannot redirect a bond through an Intake of their own: another Intake or
   action is never charged more per request than the price quoted when the promise was made, at
   most three times. A panel change applies to new requests only. IMD, the staking contract and
-  the minimum bond cannot be changed. The launch should state who holds the owner key.
+  the minimum bond cannot be changed. Who holds the owner key, and what it can change in each
+  vault, is under "Who holds the keys".
 - **The Intake's price.** The Intake the promise was made under is trusted: if it raises the
   action's price during the term, the bond pays the new price, up to what is left of the bond.
 - **Split panels.** An answer the panel did not agree on at quorum is refused, as the oracle
